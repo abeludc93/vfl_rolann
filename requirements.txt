@@ -1,0 +1,15 @@
+# Operaciones con matrices multidimensionales, algebra lineal, etc
+numpy
+scipy
+# Dataframes, lectura ficheros xlsx
+pandas
+openpyxl
+# ML, VFL benchmarks
+scikit-learn
+vertibench
+# Graficas
+matplotlib
+seaborn
+# Encriptacion
+tenseal
+cryptography
