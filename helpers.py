@@ -254,7 +254,10 @@ def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear",
     lr = kwargs.get('lr', None)
     try:
         if mode_bcd == 'sequential':
-            M_iter = np.linalg.solve(D + L, -U)
+            if lr == 1: # GS puro
+                M_iter = np.linalg.solve(D + L, -U)
+            else:       # SOR
+                M_iter = np.linalg.solve(D + lr * L, (1.0 - lr) * D - lr * U)
         elif mode_bcd == 'parallel':
             M_J = np.linalg.solve(D, -(L + U))
             M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
@@ -263,7 +266,10 @@ def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear",
     except np.linalg.LinAlgError:
     # we defer to a pseudo-inverse in case of linalg error (singular matrix)
         if mode_bcd == 'sequential':
-            M_iter = -np.linalg.pinv(D + L) @  U
+            if lr == 1:
+                M_iter = -np.linalg.pinv(D + L) @  U
+            else:
+                M_iter = np.linalg.pinv(D + lr * L) @ ((1.0 - lr) * D - lr * U)
         else:
             M_J = -np.linalg.pinv(D) @ (L + U)
             M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J

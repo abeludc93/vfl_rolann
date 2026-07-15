@@ -16,6 +16,7 @@ implementa una paralelización real de los clientes (librería joblib) en el buc
 por lo que es la opción preferida para cronometrar tiempos de ejecución realistas.
 
 """
+from math import sqrt
 from time import perf_counter
 # Third-party libraries
 import numpy as np
@@ -1040,6 +1041,7 @@ class BCDCoordinator_lrp:
 
         # Bucle
         i = 0
+        sor_lr = False
         for iter in range(max_iter):
             t_iter_ini = perf_counter()
             # Variables para guarda info iter anterior
@@ -1069,8 +1071,9 @@ class BCDCoordinator_lrp:
                     # Residuo excluyendo al propio nodo
                     z_old = z_dict[client.id]
                     e_i = d_bar - (Z - z_old)
-                    # Actualizamos pesos (ojo, lr = 1)
-                    client.update_weights(e_i, lr=1)
+                    # Actualizamos pesos (ojo, lr == 1)
+                    #client.update_weights(e_i, lr=1)
+                    client.update_weights(e_i, lr)
                     # Reemplazamos Z con nuevo input tras la actualización de los pesos
                     z_new = client.get_net_input()
                     Z = Z - z_old + z_new       # nuevo input neto global
@@ -1102,14 +1105,23 @@ class BCDCoordinator_lrp:
             score_train = simple_score(self.f_act, ytrain, ypred_train)
             self.history['score_train'].append(score_train)
 
-            # Convergencia LR 'PAR'
+            # Heuristica convergencia BCD ROLANN
+            tol_lr= 0.1
+            min_diff_Z = 1e-8 # evitamos dividir ruido
+            floor = lambda n, precision=2: np.true_divide(np.floor(n * 10**precision), 10**precision)
             if lr_heuristic:
-                if  1 < lr_transient_iters < i:
+                if  1 < lr_transient_iters < i and diff_Z_old > min_diff_Z:
                     rho_emp = diff_Z / diff_Z_old
-                    if rho_emp > 1.0:
-                        print(f"[{iter+1}] rho_emp ({rho_emp:.3f}) mayor a 1: reducimos lr")
-                        #lr = lr / 2.0
-                        lr = 0.42
+                    if mode == 'parallel' and rho_emp > (1.0 + tol_lr):
+                        lr_max = 2 * lr / (rho_emp + 1)
+                        lr = floor(0.8 * lr_max)
+                        print(f"[{iter+1}] rho_emp ({rho_emp:.3f}) mayor a 1: reducimos lr ({lr_max:.3f})")
+                        i = 0   # reiniciamos contador de fase transitoria
+                    if mode == 'sequential' and (1.0 - tol_lr**4) < rho_emp < 1.0 and not sor_lr:
+                        lr_max = 2 / (1 + sqrt(1 - rho_emp))
+                        lr = floor(lr_max)
+                        print(f"[{iter+1}] rho_emp ({rho_emp:.3f}) lento, cercano a 1: aumentamos lr ({lr_max:.3f})")
+                        sor_lr = True
                         i = 0   # reiniciamos contador de fase transitoria
                 i += 1
                 diff_Z_old = diff_Z

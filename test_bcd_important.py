@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 
 # Carga TODO: meter de todas, generar idx para hacer combinaciones en diccionarios 'p'
-n_smpl = 1000
-n_feat = 10
-n_inf  = 5
-n_red  = 3 # Más redundancia = peor condicionamiento
-n_rep  = 2
+n_smpl = 10000
+n_feat = 100
+n_inf  = 50
+n_red  = 25 # Más redundancia = peor condicionamiento
+n_rep  = 20
 n_rnd  = n_feat - (n_inf + n_red + n_rep)
 
 rng_idx = list(range(n_feat))
@@ -81,6 +81,8 @@ X_train_bias        = np.hstack([bias , X_train])
 X_train_orig_bias   = np.hstack([bias , X_train_orig.to_numpy()])
 
 #%% PLOTTERS
+import matplotlib.pyplot as plt
+import seaborn as sns
 from plotters import plot_sns, plot_weights_comparison
 sns_params = {
     'x': 'iter',        # Eje X
@@ -121,26 +123,51 @@ print(f"{'Cond. k(H_sc)->':20}{kH2:.2f}")
 #%% RADIO ESPECTRAL SEGUN SPLIT
 from helpers import check_spectral_radius
 
-p = 7
-mode = "parallel"
-lr = .6
+p = 8
+mode = "sequential"
+lr = 1
+lr2 = 1.9
+
 rho_M_iter = check_spectral_radius(X_train, p, **rolann_params|{'mode_bcd': mode, 'lr': lr})
+rho_M_iter2 = check_spectral_radius(X_train, p, **rolann_params|{'mode_bcd': mode, 'lr': lr2})
 print(f"{'Split->':40}{p}")
 print(f"{'Modo->':40}{mode}")
 print(f"{'lr->':40}{lr}")
 print(f"{'Radio espectral | rho(M_iter)->':40}{rho_M_iter:.6f}")
+
+#%% GRAFICA RHO VS LR
+mode = "parallel"
+x = np.arange(0, 2, .01)[1:]
+y_par = [check_spectral_radius(X_train, p, **rolann_params|{'mode_bcd': 'parallel', 'lr': i})
+         for i in x]
+y_seq = [check_spectral_radius(X_train, p, **rolann_params|{'mode_bcd': 'sequential', 'lr': i})
+         for i in x]
+plt.subplot(1, 2, 1)
+plt.plot(x, y_par, label=r'$\rho(\mathbf{M}_{JOR})$')
+plt.xlabel('iter')
+plt.ylabel('-')
+plt.legend()
+plt.title("Parallel")
+plt.grid()
+plt.subplot(1, 2, 2)
+plt.plot(x, y_seq, label=r'$\rho(\mathbf{M}_{SOR})$')
+plt.xlabel('iter')
+plt.ylabel('-')
+plt.legend()
+plt.title("Sequential")
+plt.grid()
 
 #%% BARRIDO RADIO ESPECTRAL
 from helpers import product_grid, check_spectral_radius
 grid = {
     'mode_bcd': ['sequential', 'parallel'],
     'lr': np.arange(0.1, 1, 0.1).tolist(),
-    'p': np.arange(2, n_feat, 5).tolist()
+    'p': np.arange(2, n_feat, 2).tolist()
 }
 
 df_spectral_radius = {'split': [], 'mode': [], 'lr': [], 'rho': []}
 for params in product_grid(grid):
-    rho_M_iter = check_spectral_radius(X_train_bias, **rolann_params|params)
+    rho_M_iter = check_spectral_radius(X_train, **rolann_params|params)
     df_spectral_radius['split'].append(params['p'])
     df_spectral_radius['mode'].append(params['mode_bcd'])
     df_spectral_radius['lr'].append(params['lr'])
@@ -217,16 +244,16 @@ print(f"ROLANN acc test: {100 * acc_test:.2f} %")
 #%% [TESTING BCD]
 from helpers import fit_bcd_models
 
-p_bcd = {0: list(range(0, 5)), 1: list(range(5, 10))}
+#p_bcd = {0: list(range(0, 5)), 1: list(range(5, 10))}
 #p_bcd = {0: list(range(0, 10, 2)), 1: list(range(1, 10, 2))}
-#p_bcd = 7
 #p_bcd = dict_imps[0.1][2]
+p_bcd = 8
 bcd_params = {
     'p':        p_bcd,
-    'max_iter': 10000,
+    'max_iter': 1000,
     'tol':      0,
-    'mode_bcd': 'parallel',
-    'lr':       .5,
+    'mode_bcd': 'sequential',
+    'lr':       1,
     'w_rolann': [mdl.w_ for mdl in models],
     'test_data': (X_test.T, y_test)
 }
@@ -399,6 +426,13 @@ Comparar los pesos de ROLANN vs BCD para ver si lo del SVD local vs SVD global h
 al BCD ROLANN en algunos casos o si tiene algo que ver con el diff_w_rolann
 """
 #%% ANALISIS RADIO ESPECTRAL: teorico vs empirico
+split = bcd_params['p']
+mode  = bcd_params['mode_bcd']
+lr    = bcd_params['lr']
+rho_M_iter = (df_spectral_radius
+              .query('split == @split and mode == @mode and lr == @lr')
+              .rho.values[0])
+#%% RHO_EMP EMPIRICO
 df_bcd = df_bcd.assign(rho_teo=rho_M_iter,
                        rho_emp=lambda f: f.diff_w / f.diff_w.shift(1),
                        rho_emp2=lambda f: f.diff_Z / f.diff_Z.shift(1))
@@ -408,7 +442,47 @@ df_bcd.loc[:100, ['rho_teo', 'rho_emp', 'rho_emp2']].plot()
 from helpers import compute_max_lr_parallel
 floor = lambda n, precision=2: np.true_divide(np.floor(n * 10**precision), 10**precision)
 
-max_lr = compute_max_lr_parallel(X_train, p, **rolann_params)
+max_lr = compute_max_lr_parallel(X_train, bcd_params['p'], **rolann_params)
 print(f"Max LR modo PAR: {floor(max_lr)}")
 
 # %%
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+axes = axes.flatten()
+df = df_bcd.query("iter<100")
+
+plot_sns(df,
+         title=r'Convergencia $\Delta\mathbf{w}$',
+         **sns_params|{'y':'diff_w', 'ax':axes[1]})
+
+axes[0].plot(df.iter, df.rho_emp2, label=r'$\hat\phi = \Delta\mathbf{Z}^{k+1} / \Delta\mathbf{Z}^{k}$')
+axes[0].axhline(rho_M_iter, linestyle='--', label=r"$\phi = \rho(\mathbf{M}_{JOR})$", color='red', alpha=0.6)
+axes[0].legend()
+axes[0].set_title(r'Estimación $\rho(\mathbf{M}_{iter})$')
+axes[0].grid()
+
+plt.suptitle(f"(BCD_ROLANN) - {mode} - {'divergente' if rho_M_iter > 1 else 'convergente'}")
+plt.tight_layout()
+# %%
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+axes = axes.flatten()
+df = df_bcd.query("iter<100")
+
+sns.lineplot(df, x='iter', y='rho_emp', hue='lr', ax=axes[0], palette='bright', legend=False)
+axes[0].axhline(rho_M_iter, linestyle='--', color='violet', label=r'$\rho(\mathbf{M}_{JOR}^0$)')
+axes[0].axhline(rho_M_iter2, linestyle='-.', color='green', label=r'$\rho(\mathbf{M}_{JOR}^1)$')
+axes[0].legend()
+axes[0].set_title(r'Evolución de $\hat\phi$ con heurística')
+axes[0].axvline(13, linestyle=':', alpha=0.5, color='grey')
+axes[0].grid()
+
+plot_sns(df,
+         title=r'Convergecia con $\Delta\mathbf{Z}$',
+         **sns_params|{'ax':axes[1]})
+
+plt.suptitle(f"(BCD_ROLANN) - {mode} - {'divergente' if rho_M_iter > 1 else 'convergente'}")
+plt.tight_layout()
