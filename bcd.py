@@ -1117,7 +1117,7 @@ class BCDCoordinator_lrp:
                         lr = floor(0.8 * lr_max)
                         print(f"[{iter+1}] rho_emp ({rho_emp:.3f}) mayor a 1: reducimos lr ({lr_max:.3f})")
                         i = 0   # reiniciamos contador de fase transitoria
-                    if mode == 'sequential' and (1.0 - tol_lr**4) < rho_emp < 1.0 and not sor_lr:
+                    if mode == 'sequential' and (1.0 - tol_lr) < rho_emp < 1.0 and not sor_lr:
                         lr_max = 2 / (1 + sqrt(1 - rho_emp))
                         lr = floor(lr_max)
                         print(f"[{iter+1}] rho_emp ({rho_emp:.3f}) lento, cercano a 1: aumentamos lr ({lr_max:.3f})")

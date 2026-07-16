@@ -1,3 +1,36 @@
+# %% [DATASET] - Gisette
+from sklearn.preprocessing import StandardScaler
+from helpers import load_dataset
+import numpy as np
+import pandas as pd
+
+# Carga
+X_train_orig, y_train_orig  = load_dataset("datasets/clasificacion/VertiBench/Gisette_train.xlsx")
+X_val_orig, y_val_orig      = load_dataset("datasets/clasificacion/VertiBench/Gisette_valid.xlsx")
+X_test_orig, y_test_orig    = load_dataset("datasets/clasificacion/VertiBench/Gisette_test.xlsx")
+
+labels = np.unique(y_train_orig)
+print(labels)
+print(f"(TRAIN) Reparto clases [1|0]: {y_train_orig.value_counts()}")
+print(f"(VALID) Reparto clases [1|0]: {y_val_orig.value_counts()}")
+print(f"(TEST)  Reparto clases [1|0]: {y_test_orig.value_counts()}")
+
+# Normalización (datos entrada)
+scaler = StandardScaler().set_output(transform='pandas')
+scaler.fit(X_train_orig)
+
+Xtrain = scaler.transform(X_train_orig)
+Xtest  = scaler.transform(X_val_orig)   # Ojo uso VALID como TEST
+
+X_train = Xtrain.to_numpy()
+X_test  = Xtest.to_numpy()
+y_train = y_train_orig.to_numpy()
+y_test  = y_val_orig.to_numpy()
+
+# Mapeado de clases a 0|1
+y_train = np.where(y_train == -1, 0, 1)
+y_test  = np.where(y_test == -1, 0, 1)
+
 # %% [DATASET] - division 70/30
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
@@ -97,10 +130,11 @@ sns_params = {
 # %% [HIPERPARAMS]
 rolann_params = {
     'f_act':    'logs',
-    'lam':      1e-5
+    #'lam':      1e-5,
+    'lam':       1,
 }
 lr_params = {
-    'lam':      1e-1
+    'lam':      1
 }
 
 #%% CONDICIONAMIENTO
@@ -136,7 +170,6 @@ print(f"{'lr->':40}{lr}")
 print(f"{'Radio espectral | rho(M_iter)->':40}{rho_M_iter:.6f}")
 
 #%% GRAFICA RHO VS LR
-mode = "parallel"
 x = np.arange(0, 2, .01)[1:]
 y_par = [check_spectral_radius(X_train, p, **rolann_params|{'mode_bcd': 'parallel', 'lr': i})
          for i in x]
@@ -247,11 +280,11 @@ from helpers import fit_bcd_models
 #p_bcd = {0: list(range(0, 5)), 1: list(range(5, 10))}
 #p_bcd = {0: list(range(0, 10, 2)), 1: list(range(1, 10, 2))}
 #p_bcd = dict_imps[0.1][2]
-p_bcd = 8
+p_bcd = 10
 bcd_params = {
     'p':        p_bcd,
     'max_iter': 1000,
-    'tol':      0,
+    'tol':      1e-6,
     'mode_bcd': 'sequential',
     'lr':       1,
     'w_rolann': [mdl.w_ for mdl in models],
@@ -429,14 +462,16 @@ al BCD ROLANN en algunos casos o si tiene algo que ver con el diff_w_rolann
 split = bcd_params['p']
 mode  = bcd_params['mode_bcd']
 lr    = bcd_params['lr']
-rho_M_iter = (df_spectral_radius
-              .query('split == @split and mode == @mode and lr == @lr')
-              .rho.values[0])
+#rho_M_iter = (df_spectral_radius
+#              .query('split == @split and mode == @mode and lr == @lr')
+#              .rho.values[0])
+from helpers import check_spectral_radius
+rho_M_iter = check_spectral_radius(X_train, split, **rolann_params|{'mode_bcd': mode, 'lr': lr})
 #%% RHO_EMP EMPIRICO
 df_bcd = df_bcd.assign(rho_teo=rho_M_iter,
-                       rho_emp=lambda f: f.diff_w / f.diff_w.shift(1),
-                       rho_emp2=lambda f: f.diff_Z / f.diff_Z.shift(1))
-df_bcd.loc[:100, ['rho_teo', 'rho_emp', 'rho_emp2']].plot()
+                       rho_emp_w=lambda f: f.diff_w / f.diff_w.shift(1),
+                       rho_emp_z=lambda f: f.diff_Z / f.diff_Z.shift(1))
+df_bcd.loc[:100, ['rho_teo', 'rho_emp_w', 'rho_emp_z']].plot()
 
 #%% LR MAXIMO SEGUN SPLIT MODO 'PAR'
 from helpers import compute_max_lr_parallel
@@ -450,13 +485,15 @@ import matplotlib.pyplot as plt
 
 fig, axes = plt.subplots(1, 2, figsize=(8, 4))
 axes = axes.flatten()
-df = df_bcd.query("iter<100")
+df = df_bcd
 
 plot_sns(df,
-         title=r'Convergencia $\Delta\mathbf{w}$',
-         **sns_params|{'y':'diff_w', 'ax':axes[1]})
+         title=r'Convergencia',
+         tol=1e-6,
+         **sns_params|{'y':'diff_Z', 'ax':axes[1]})
 
-axes[0].plot(df.iter, df.rho_emp2, label=r'$\hat\phi = \Delta\mathbf{Z}^{k+1} / \Delta\mathbf{Z}^{k}$')
+axes[0].plot(df.iter[:14], df.rho_emp_z[:14], label=r'$\hat\phi^0 = \Delta\mathbf{Z}^{k+1} / \Delta\mathbf{Z}^{k}$', color='blue')
+axes[0].plot(df.iter[14:], df.rho_emp_z[14:], label=r'$\hat\phi^1 = \Delta\mathbf{Z}^{k+1} / \Delta\mathbf{Z}^{k}$', color='orange')
 axes[0].axhline(rho_M_iter, linestyle='--', label=r"$\phi = \rho(\mathbf{M}_{JOR})$", color='red', alpha=0.6)
 axes[0].legend()
 axes[0].set_title(r'Estimación $\rho(\mathbf{M}_{iter})$')
