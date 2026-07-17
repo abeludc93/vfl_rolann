@@ -38,7 +38,7 @@ from sklearn.preprocessing import StandardScaler
 import numpy as np
 import pandas as pd
 
-# Carga TODO: meter de todas, generar idx para hacer combinaciones en diccionarios 'p'
+# Carga: meter de todas, generar idx para hacer combinaciones en diccionarios 'p'
 n_smpl = 10000
 n_feat = 100
 n_inf  = 50

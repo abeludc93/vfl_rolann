@@ -84,7 +84,7 @@ plot_score(res_seq)
 plot_mode_diffs(df_res)
 plot_mode_scores(df_res)
 
-#3. TODO: idem pero para otros hiperparams (lr, lam, etc)
+#3. Idem pero para otros hiperparams (lr, lam, etc)
 
 #%% [GRIDSEARCH]
 from helpers import run_grid_search

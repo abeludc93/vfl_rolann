@@ -414,7 +414,7 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
 
     # Dividimos 'X' para los distintos clientes
     X_lst_T = split_vfl_X(X_train.T, p)
-    # TODO: cuando 'p' es un diccionario, el split puede estar desordenado
+    # EXPLICACION: cuando 'p' es un diccionario, el split puede estar desordenado
     # en relación a las variables, por lo que hay que re-ordenar los pesos
     # de la sol. centralizada (ROLANN) y las filas de Xtest (atributos)
     if type(p) == dict: 
