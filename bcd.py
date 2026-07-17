@@ -23,8 +23,21 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import root_mean_squared_error, accuracy_score
 # Application modules
-from activation_functions import load_act_fn, map_labels, NEG_VALUE, POS_VALUE
+from activation_functions import load_act_fn, map_labels
 
+
+# Auxiliary function
+def simple_score(f_act, y_true, y_pred):
+    if f_act == 'linear':
+        # suponemos regresión
+        score = root_mean_squared_error(y_true, y_pred)
+    else:
+        # suponemos clasificación
+        _, negpos_tuple = map_labels(f_act)
+        UMBRAL = 0.5 * sum(negpos_tuple)
+        y_pred = np.where(y_pred <= UMBRAL, 0, 1)
+        score = accuracy_score(y_true, y_pred)
+    return score
 
 class BCDClient:
     def __init__(self, id, X, f_act='linear', lam=0.001, debug=True):
@@ -50,19 +63,20 @@ class BCDClient:
 
         # Cargamos f.act.
         _, f_inv, f_der = load_act_fn(self.f_act)
-        scalar_f_dbar   = 1 if self.f_act == 'linear' else f_der(f_inv(NEG_VALUE)) 
+        _, negpos_tuple = map_labels(self.f_act)
+        scalar_f_dbar   = 1 if self.f_act == 'linear' else f_der(f_inv(negpos_tuple[0]))
         
         # Matriz factorizacion: H = X @ F
         H = self.Xp * scalar_f_dbar
 
         # SVD (V ya viene traspuesta)
         U, S, V = np.linalg.svd(H, full_matrices=False)
-        Sigma = np.diag(S / (S**2 + self.lam))
+        Sigma = (S / (S**2 + self.lam))
 
         # Calculo inversa regularizada:  U @ Sigma @ V @ F
-        self.USVF = U @ Sigma @ V * scalar_f_dbar
+        self.USVF = (U * Sigma) @ (V * scalar_f_dbar)
 
-        print(f"[Client {self.id}] SVD-precompute done!")
+        print(f"[{self.__class__.__name__} {self.id}] SVD-precompute done!")
         self.precomputed_ = True
         if self.debug:  self.history = {'norm_grd': [], 'norm_res': [], 'norm_inp': []}
         return self.USVF
@@ -122,7 +136,7 @@ class BCDCoordinator:
 
     def fit(self, max_iter=20, tol=1e-3, lr=0.75, mode='parallel', init='zero'):
 
-        print(f"Iniciando BCD ({mode}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
+        print(f"Iniciando {self.__class__.__name__} ({mode}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
         self.hparams = {'max_iter': max_iter, 'tol': tol, 'lr': lr, 'mode': mode, 'init': init, 'p': len(self.clients)}
         self.history = {'diff_w': [], 'diff_Z': [], 'diff_w_rolann': [], 'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
         self.reset(hard=False)  # Reiniciamos pesos de clientes de 'fits' anteriores
@@ -141,8 +155,8 @@ class BCDCoordinator:
         # [BCD]        
     
         # Calculo d_bar
-        map_fn = map_labels(self.f_act)                 # mapeo (0, 1) a (NEG_VALUE, POS_VALUE) en caso de clasif.
-        d = map_fn(self.d).reshape([-1, 1])             # reshape para vector columna
+        map_fn, _ = map_labels(self.f_act)      # mapeo de clases en caso de clasif.
+        d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)  
 
@@ -256,78 +270,9 @@ class BCDCoordinator:
         return y_pred
 
 #====================================================================================================================
-#===[Versiones alternativas cliente y coordinador con operaciones eficientes - para cronometrado y paralelización]===
+#===[Versiones alternativas del coordinador con operaciones eficientes - para cronometrado y paralelización]===
 #====================================================================================================================
 from joblib import Parallel, delayed
-
-
-class BCDClient_par:
-    def __init__(self, id, X, f_act='linear', lam=0.001):
-        # Constructor
-        self.id     = id        # ID cliente. (id == 1 -> responsable del 'bias')
-        self.X      = X         # Matriz de datos local m x n (variables, muestras)
-        self.f_act  = f_act     # Función de activación
-        self.lam    = lam       # Regularización l2
-        
-    def precompute(self):
-        if hasattr(self, 'precomputed_') and self.precomputed_: return
-
-        # Bias
-        if self.id == 1:
-            self.Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])
-        else:
-            self.Xp = self.X
-
-        # Inicializamos pesos
-        m, n = self.Xp.shape
-        self.w = np.zeros([m, 1])
-
-        # Cargamos f.act.
-        _, f_inv, f_der = load_act_fn(self.f_act)
-        scalar_f_dbar   = 1.0 if self.f_act == 'linear' else f_der(f_inv(NEG_VALUE)) 
-        
-        # Matriz factorizacion: H = X @ F = X @ (k I) = k * X
-        H = self.Xp * scalar_f_dbar
-
-        # SVD (V ya viene traspuesta)
-        U, S, V = np.linalg.svd(H, full_matrices=False)
-        Sigma = (S / (S**2 + self.lam))
-
-        # Calculo inversa regularizada:  U @ Sigma @ V @ F
-        self.USVF = (U * Sigma) @ (V * scalar_f_dbar)
-
-        print(f"[Client alt. {self.id}] SVD-precompute done!")
-        self.precomputed_ = True
-        return self.USVF
-
-    def get_net_input(self):
-        # Devolvemos z = X^T @ w
-        return self.Xp.T @ self.w
-    
-    def update_weights(self, e_i, lr=0.75):
-        # Calculamos actualización del peso multiplicando por el residual enviado por el coord.
-        w_new = self.USVF @ e_i
-        
-        # Aplicamos tasa de aprendizaje (lr, learning rate)
-        self.w = (1 - lr) * self.w + lr * w_new
-        return self.w
-    
-    def predict(self, X):
-        # Devolvemos y_pred = f(z) = f(X.T w) -> Dimensiones X (m, n)
-        if self.id == 1:
-            Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])  # bias
-        else:
-            Xp = X
-        f, _, _ = load_act_fn(self.f_act)
-        y_pred = f(Xp.T @ self.w)
-
-        return y_pred   
-    
-    def reset(self, hard=False):
-        if hasattr(self, 'w'):
-            self.w = np.zeros_like(self.w)
-        if hard and hasattr(self, 'precomputed_'):
-            self.precomputed_ = False
 
 
 class BCDCoordinator_par:
@@ -370,8 +315,8 @@ class BCDCoordinator_par:
         # [BCD]        
     
         # Calculo d_bar
-        map_fn = map_labels(self.f_act)                 # mapeo (0, 1) a (NEG_VALUE, POS_VALUE) en caso de clasif.
-        d = map_fn(self.d).reshape([-1, 1])             # reshape para vector columna
+        map_fn, _ = map_labels(self.f_act)      # mapeo de clases en caso de clasif.
+        d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)  
 
@@ -473,19 +418,6 @@ class BCDCoordinator_par:
 
         return y_pred
 
-
-def simple_score(f_act, y_true, y_pred):
-    if f_act == 'linear':
-        # suponemos regresión
-        score = root_mean_squared_error(y_true, y_pred)
-    else:
-        # suponemos clasificación
-        UMBRAL = 0.5 * (NEG_VALUE + POS_VALUE)
-        y_pred = np.where(y_pred <= UMBRAL, 0, 1)
-        score = accuracy_score(y_true, y_pred)
-    return score
-
-
 #==================================================================================================================
 #===[Versiones alternativas cliente y coordinador con operaciones encriptadas homomorficamente y paralelización]===
 #==================================================================================================================
@@ -493,86 +425,23 @@ from joblib import Parallel, delayed
 import tenseal as ts
 
 
-class BCDClient_fhe:
-    def __init__(self, id, X, f_act='linear', lam=0.001, ctx=None):
+class BCDClient_fhe(BCDClient):
+    def __init__(self, id, X, f_act='linear', lam=0.001, debug=True, ctx=None):
         # Constructor
-        self.id     = id        # ID cliente. (id == 1 -> responsable del 'bias')
-        self.X      = X         # Matriz de datos local m x n (variables, muestras)
-        self.f_act  = f_act     # Función de activación
-        self.lam    = lam       # Regularización l2
+        super().__init__(id, X, f_act, lam, debug)
         self.ctx    = ctx       # TenSEAL FHE context
         
-    def precompute(self):
-        if hasattr(self, 'precomputed_') and self.precomputed_: return
-
-        # Bias
-        if self.id == 1:
-            self.Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])
-        else:
-            self.Xp = self.X
-
-        # Inicializamos pesos
-        m, n = self.Xp.shape
-        self.w = np.zeros([m, 1])
-
-        # Cargamos f.act.
-        _, f_inv, f_der = load_act_fn(self.f_act)
-        scalar_f_dbar   = 1.0 if self.f_act == 'linear' else f_der(f_inv(NEG_VALUE)) 
-        
-        # Matriz factorizacion: H = X @ F = X @ (k I) = k * X
-        H = self.Xp * scalar_f_dbar
-
-        # SVD (V ya viene traspuesta)
-        U, S, V = np.linalg.svd(H, full_matrices=False)
-        Sigma = (S / (S**2 + self.lam))
-
-        # Calculo inversa regularizada:  U @ Sigma @ V @ F
-        self.USVF = (U * Sigma) @ (V * scalar_f_dbar)
-
-        print(f"[Client alt. {self.id}] SVD-precompute done!")
-        self.precomputed_ = True
-        return self.USVF
-
-    def _get_net_input(self):
-        # Devolvemos z = X^T @ w
-        return self.Xp.T @ self.w
-    
     def get_net_input(self):
         assert self.ctx is not None and self.ctx.has_secret_key()
-        z = self._get_net_input().flatten()             # vector columna input neto -> aplanamos
+        z = super().get_net_input().flatten()           # vector col. input neto -> aplanamos
         z_fhe = ts.ckks_vector(self.ctx, z.tolist())    # trabaja con listas como vectores
         return z_fhe
 
-    def _update_weights(self, e_i, lr=0.75):
-        # Calculamos actualización del peso multiplicando por el residual enviado por el coord.
-        w_new = self.USVF @ e_i
-        
-        # Aplicamos tasa de aprendizaje (lr, learning rate)
-        self.w = (1 - lr) * self.w + lr * w_new
-        return self.w
-    
     def update_weights(self, e_i_fhe, lr=0.75):
         assert self.ctx is not None and self.ctx.has_secret_key()
         e_i_lst = e_i_fhe.decrypt(self.ctx.secret_key())
-        e_i = np.asarray(e_i_lst).reshape([-1, 1])          # lista a vector columna
-        return self._update_weights(e_i, lr)
-
-    def predict(self, X):
-        # Devolvemos y_pred = f(z) = f(X.T w) -> Dimensiones X (m, n)
-        if self.id == 1:
-            Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])  # bias
-        else:
-            Xp = X
-        f, _, _ = load_act_fn(self.f_act)
-        y_pred = f(Xp.T @ self.w)
-
-        return y_pred   
-    
-    def reset(self, hard=False):
-        if hasattr(self, 'w'):
-            self.w = np.zeros_like(self.w)
-        if hard and hasattr(self, 'precomputed_'):
-            self.precomputed_ = False
+        e_i = np.asarray(e_i_lst).reshape(-1, 1)        # lista a vector columna
+        return super().update_weights(e_i, lr)
 
 
 class BCDCoordinator_fhe:
@@ -616,11 +485,11 @@ class BCDCoordinator_fhe:
         # [BCD]        
     
         # Calculo d_bar
-        map_fn = map_labels(self.f_act)                 # mapeo (0, 1) a (NEG_VALUE, POS_VALUE) en caso de clasif.
-        d = map_fn(self.d).reshape([-1, 1])             # reshape para vector columna
+        map_fn, _ = map_labels(self.f_act)        # mapeo en caso de clasificación
+        d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)
-        d_bar = d_bar.flatten().tolist()                # para fhe necesitamos listas planas  
+        d_bar = d_bar.flatten().tolist()        # para fhe necesitamos listas planas  
 
         # Inicialización de Z y w: en este caso 'init' ya no es necesario porque Z ya irá encriptado
         Z_iter = np.zeros_like(d) if init == 'zero' else np.random.rand(d.shape)
@@ -731,92 +600,26 @@ class BCDCoordinator_fhe:
 #========================================================================================================
 from cryptography.hazmat.primitives.asymmetric import x25519
 
-class BCDClient_sec:
-    def __init__(self, id, X, f_act='linear', lam=0.001, ss=None):
+class BCDClient_sec(BCDClient):
+    def __init__(self, id, X, f_act='linear', lam=0.001, debug=True, ss=None):
         # Constructor
-        self.id     = id        # ID cliente. (id == 1 -> responsable del 'bias')
-        self.X      = X         # Matriz de datos local m x n (variables, muestras)
-        self.f_act  = f_act     # Función de activación
-        self.lam    = lam       # Regularización l2
+        super().__init__(id, X, f_act, lam, debug)
         self.ss     = ss        # Shared secrets dictionary
         
-    def precompute(self):
-        if hasattr(self, 'precomputed_') and self.precomputed_: return
-
-        # Bias
-        if self.id == 1:
-            self.Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])
-        else:
-            self.Xp = self.X
-
-        # Inicializamos pesos
-        m, n = self.Xp.shape
-        self.w = np.zeros([m, 1])
-
-        # Cargamos f.act.
-        _, f_inv, f_der = load_act_fn(self.f_act)
-        scalar_f_dbar   = 1.0 if self.f_act == 'linear' else f_der(f_inv(NEG_VALUE)) 
-        
-        # Matriz factorizacion: H = X @ F = X @ (k I) = k * X
-        H = self.Xp * scalar_f_dbar
-
-        # SVD (V ya viene traspuesta)
-        U, S, V = np.linalg.svd(H, full_matrices=False)
-        Sigma = (S / (S**2 + self.lam))
-
-        # Calculo inversa regularizada:  U @ Sigma @ V @ F
-        self.USVF = (U * Sigma) @ (V * scalar_f_dbar)
-
-        print(f"[Client alt. {self.id}] SVD-precompute done!")
-        self.precomputed_ = True
-        return self.USVF
-
-    def _get_net_input(self):
-        # Devolvemos z = X^T @ w
-        return self.Xp.T @ self.w
-    
     def get_net_input(self):
         nclients = len(self.ss)
-        z = self._get_net_input()
+        z = super().get_net_input()
 
         mask = np.zeros_like(z, dtype=float)
         for j in range(nclients):
-            if (j+1) == self.id:
-                continue
+            if j + 1 == self.id:continue
             ss_j = self.ss[j]
             rng = np.random.default_rng(int.from_bytes(ss_j[:8], "little"))
             m = rng.normal(size=z.shape)
-            if self.id < (j+1):
-                mask += m
-            else:
-                mask -= m
+            if self.id < j + 1: mask += m
+            else:               mask -= m
 
         return z + mask
-
-    def update_weights(self, e_i, lr=0.75):
-        # Calculamos actualización del peso multiplicando por el residual enviado por el coord.
-        w_new = self.USVF @ e_i
-        
-        # Aplicamos tasa de aprendizaje (lr, learning rate)
-        self.w = (1 - lr) * self.w + lr * w_new
-        return self.w
-
-    def predict(self, X):
-        # Devolvemos y_pred = f(z) = f(X.T w) -> Dimensiones X (m, n)
-        if self.id == 1:
-            Xp = np.vstack([np.ones((1, self.X.shape[1])), self.X])  # bias
-        else:
-            Xp = X
-        f, _, _ = load_act_fn(self.f_act)
-        y_pred = f(Xp.T @ self.w)
-
-        return y_pred   
-    
-    def reset(self, hard=False):
-        if hasattr(self, 'w'):
-            self.w = np.zeros_like(self.w)
-        if hard and hasattr(self, 'precomputed_'):
-            self.precomputed_ = False
 
     def generate_dh_keys(self):
         sk = x25519.X25519PrivateKey.generate()
@@ -872,8 +675,8 @@ class BCDCoordinator_sec:
         # [BCD]        
     
         # Calculo d_bar
-        map_fn = map_labels(self.f_act)                 # mapeo (0, 1) a (NEG_VALUE, POS_VALUE) en caso de clasif.
-        d = map_fn(self.d).reshape([-1, 1])             # reshape para vector columna
+        map_fn, _ = map_labels(self.f_act)      # mapeo en caso de clasificación
+        d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)
 
@@ -1025,8 +828,8 @@ class BCDCoordinator_lrp:
         # [BCD]        
     
         # Calculo d_bar
-        map_fn = map_labels(self.f_act)                 # mapeo (0, 1) a (NEG_VALUE, POS_VALUE) en caso de clasif.
-        d = map_fn(self.d).reshape([-1, 1])             # reshape para vector columna
+        map_fn, _ = map_labels(self.f_act)      # mapeo en caso de clasificacion
+        d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)  
 

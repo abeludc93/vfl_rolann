@@ -1,17 +1,17 @@
-# Ignore IDE PyCharm/VSCode files
+# Ficheros IDE
 .vscode/
 .idea/
-# Log files
+# Logs
 *.log
 *.out
-# Byte-compiled / optimized / DLL files
+# Cache Python
 __pycache__/
 *.py[cod]
-# Virtual environments
+# Entornos virtuales
 .venv/
 env/
 venv/
-# Datasets, cache, documentation and results folders
+# Carpetas de datasets, cache, documentación y resultados
 datasets/
 cache/
 docs/
