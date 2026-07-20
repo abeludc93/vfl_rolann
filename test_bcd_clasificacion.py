@@ -65,7 +65,7 @@ res_seq = coord.get_results()
 res_seq
 
 #%% (paralelo)
-coord.reset(hard=True)  # para resetear precomputo clientes y tener en cuenta t_setup
+#coord.reset(hard=True)  # para resetear precomputo clientes y tener en cuenta t_setup
 coord.fit(max_iter=max_iter, tol=tol, lr=lr, mode='parallel')
 res_par = coord.get_results()
 res_par

@@ -17,7 +17,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from bcd import BCDClient, BCDCoordinator
 from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_loss_log, compute_loss_linear
 from rolann import ROLANN, compute_loss_J_w
-from activation_functions import load_act_fn, POS_VALUE, NEG_VALUE
+from activation_functions import load_act_fn
 
 
 def disarrange_weights_by_split(w_coord, p_dict):
@@ -442,12 +442,9 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
 
     lst_clients = [BCDClient(id=i+1, X=X_lst_T[i], f_act=f_act, lam=lam)
                     for i in range(num_nodos)]
-    #lst_coords = [BCDCoordinator(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n])
-    #              for n in range(num_outputs)]
-    from bcd import BCDCoordinator_lrp
-    lst_coords = [BCDCoordinator_lrp(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n]) 
+    lst_coords = [BCDCoordinator(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n])
                   for n in range(num_outputs)]
-
+    
     # Fit
     for i, coord in enumerate(lst_coords):
         print(f"Entrenando BCD ROLANN para clase-salida {i+1}/{num_outputs}...")
