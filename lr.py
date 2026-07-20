@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lr
+lr.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Implementación básica de un modelo tipo LogisticRegression con regularización
 L2 para el escenario federado VFL. Equivalente a un LogisticRegression de sklearn.
@@ -14,7 +14,9 @@ from sklearn.metrics import accuracy_score, root_mean_squared_error
 import numpy as np
 
 
-# Act. functions used and taylor approximations
+#===============================================
+#===[Funciones de activación y aprox. Taylor]===
+#===============================================
 def linear(z):
     return z
 
@@ -39,6 +41,9 @@ def log_likelihood_taylor(ytrue, z):
     loss = np.mean(np.log(2) + (0.5 - ytrue) * z + 0.125 * (z ** 2))
     return loss
 
+#=====================================
+#===[Funciones de pérdida/objetivo]===
+#=====================================
 def compute_loss_log(w, X, y, lam, **kwargs):
     # Proxy para calcular valor de la f.objetivo a semejanza de compute_loss_J_w de ROLANN.py (mismos args.)
     Xp = np.vstack([np.ones(len(X)), X.T])
@@ -71,6 +76,10 @@ def val_loss_linear(y, z, w, lam, reg_bias=False, **kwargs):
     
     return 0.5 * (loss + lam * loss_l2)
 
+
+#===================================================
+#===[VFL_LR: implementación similar a BCD_ROLANN]===
+#===================================================
 
 class LRClient:
     def __init__(self, id, X, lam=0.001, debug=True):
@@ -137,8 +146,6 @@ class LRClient:
             self.g_old_ = grad.copy()
 
             # Calcular dirección de descenso y actualizar peso según 'lr'
-            #p = -self.H_ @ grad
-            #self.w_ = self.w_ + lr * p
             grad = -self.H @ grad
             self.w_ = self.w_ + lr * grad
        
@@ -307,13 +314,15 @@ class LRCoordinator:
 
         return y_pred
 
-#~~~~~~Ridge~~~~~~
+
+#==================================================
+#===[RIDGE: solo es necesario cambiar la f.act.]===
+#==================================================
 
 class RidgeClient(LRClient):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.f_act = 'linear'
-
 
 class RidgeCoordinator(LRCoordinator):
     def __init__(self, **kwargs):

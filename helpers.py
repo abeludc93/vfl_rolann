@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 """
-helpers
+helpers.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Funciones de utilidad para experimentacion VFL
+(1) Datasets:       carga de datos, desbalanceo de clases
+(2) Splits:         división vertical de la matriz de datos, ordenar componentes según split, extraer índices del split
+(3) Models:         entrenamiento y orquestación de modelos, grid-search, etc (ROLANN|BCD_ROLANN|LR|VFL_LR)
+(4) Results:        métricas adicionales, orquestación de predicciones multi-output.
+(5) Convergence:    condicionamiento del problema, radios espectrales de matrices de iteación, factor de relajación óptimos.
 """
+# Standard libraries
 from time import perf_counter
 import itertools
 import copy
@@ -17,63 +23,57 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from bcd import BCDClient, BCDCoordinator
 from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_loss_log, compute_loss_linear
 from rolann import ROLANN, compute_loss_J_w
-from activation_functions import load_act_fn
+from activation_functions import load_act_fn, map_labels
 
 
-def disarrange_weights_by_split(w_coord, p_dict):
+#====================
+#===[(1) Datasets]===
+#====================
+
+def load_dataset(path):
+    """Load dataset given in 'path' and returns X/y dataframes."""
+    print(f"Cargando dataset - {path} ...", end=" ")
+    df_dic = pd.read_excel(path, sheet_name=["X","y"])
+    X, y = df_dic['X'], df_dic['y']
+    print(f"Listo!\nMuestras/Variables: {X.shape} | Target: {y.shape}")
+
+    return X, y
+
+def balance_train_data(X_train, y_train, random_state=1):
+    # Aplica under-sampling aleatorio para igualar las clases en el conjunto de entrenamiento
+    np.random.seed(random_state)
     
-    # Extraemos bias (suponemos 1er nodo) y resto de pesos
-    w_coord_flt = w_coord.flatten()
-    bias, weights = w_coord_flt[0], w_coord_flt[1:]
+    # Proporcion de clases
+    proportion = y_train.value_counts(normalize=True, ascending=True)
+    minority_class = proportion.index[0][0]
+    majority_class = proportion.index[1][0]
+    print(f"Desequilibrio de clases dataset:\n{proportion}")
+    print(f"Clase minoritaria: {minority_class}, clase mayoritaria: {majority_class}")
 
-    # Máscara de pesos "originales"
-    w_orig = np.empty_like(weights)
+    # Encontramos los índices de ambas clases (ilocs)
+    idx_minority = np.where(y_train == minority_class)[0]
+    idx_majority = np.where(y_train == majority_class)[0]
     
-    # Índices de las columnas en el split vertical de `p_dict`
-    split_w_idx = [idx for sublist in list(p_dict.values()) for idx in sublist]
-    w_orig[split_w_idx] = weights   # las colocamos ordenadas
-
-    # Concatenamos en vector columna
-    w_ = np.concatenate([[bias], w_orig]).reshape(-1, 1)
-    return w_
-
-
-def arrange_weights_by_split(w, p):
-    bias    = w[0]
-    w_p     = split_vfl_X(w[1:], p)
-    w_stack = np.vstack([bias, *w_p])
-    return w_stack
-
-def build_dataframe_from_split(df, split_lst):
-    mapping = map_columns_from_split(df, split_lst)
-    df_lst = [df[cols] for cols in mapping.values()]
-    return df_lst
+    # Contamos los casos de la clase minoritaria
+    n_minority = len(idx_minority)
+    
+    # Seleccionamos aleatoriamente la misma cantidad de la clase mayoritaria
+    idx_majority_downsampled = np.random.choice(idx_majority, size=n_minority, replace=False)
+    
+    # Juntamos los índices y los mezclamos para que no queden ordenados
+    idx_balanced = np.concatenate([idx_minority, idx_majority_downsampled])
+    np.random.shuffle(idx_balanced)
+    
+    # Extraemos el nuevo conjunto de balanceado (50/50)
+    X_train_balanced = X_train.iloc[idx_balanced]
+    y_train_balanced = y_train.iloc[idx_balanced]
+    
+    return X_train_balanced, y_train_balanced
 
 
-def map_columns_from_split(df, split_lst):
-    # Diccionario índice subdivison -> columnas
-    mapping = {}
-
-    for i, split in enumerate(split_lst):
-        cols = []
-        split_cols = split.shape[1]
-        for idx_col in range(split_cols):
-            split_col = split[:, idx_col]
-            name_col  = [col for col in df if np.array_equal(df[col], split_col)]
-            if name_col:
-                cols += name_col
-            else:
-                raise ValueError(f"No se halló correspondencia para la columna {idx_col} del split {i}")
-        mapping[i] = cols
-
-    return mapping
-
-
-def get_column_indexes(df, cols):
-    assert np.all([c in df.columns for c in cols])
-    indexes = df.columns.get_indexer(cols)
-    return indexes
-
+#==================
+#===[(2) Splits]===
+#==================
 
 def split_vfl_X(X, p):
     """
@@ -129,234 +129,38 @@ def split_vfl_X(X, p):
         assert np.array_equal(X, np.concatenate(X_lst))
     return X_lst
 
-
-def run_grid_search(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
-    """
-    Run experiments over a grid-search combination of hyperparameters.
+def disarrange_weights_by_split(w_coord, p_dict):
     
-    param_grid = {
-        # ROLANN PARAMS
-        'f_act': ['logs'],                      # f.act.
-        'lam': [0.001, 0.01]                    # regularization
+    # Extraemos bias (suponemos 1er nodo) y resto de pesos
+    w_coord_flt = w_coord.flatten()
+    bias, weights = w_coord_flt[0], w_coord_flt[1:]
 
-        # BCD params
-        'p': [[2, 2], [4, 4]],                  # node config
-        'mode_bcd': ['parallel', 'sequential'], # modes
-        'lr': [0.5, 0.75, 1.0],                 # learning rates
-        'tol': [1e-5]                           # tolerance
-        'max_iter': [20, 50]                    # max iterations
-        ...
-    }
-    """
-
-    # Combinaciones posibles de hiperparams - prod. cartesiano
-    combinations = product_grid(param_grid)
-    print(f"Iniciando grid-search con {len(combinations)} combinaciones...")
+    # Máscara de pesos "originales"
+    w_orig = np.empty_like(weights)
     
-    old_params = None   # Optim. para no repetir modelos centralizados
-    results = []
-    for i, params in enumerate(combinations):
-        print(f"--- Experimento Nº {i+1}/{len(combinations)}: {params} ---")
-        
-        # [ROLANN] solución centralizada
-        f_act       = params['f_act']
-        lam         = params['lam']
-        if (f_act, lam) != old_params:
-            t_rolann    = perf_counter()
-            mdls_rolann = fit_rolann_models(X_train, y_train, mode=mode, f_act=f_act, lam=lam)
-            print(f"ROLANN centralizado entrenado en: {perf_counter() - t_rolann:.2f} (s)")
+    # Índices de las columnas en el split vertical de `p_dict`
+    split_w_idx = [idx for sublist in list(p_dict.values()) for idx in sublist]
+    w_orig[split_w_idx] = weights   # las colocamos ordenadas
 
-        # [BCD ROLANN]
-        params['w_rolann']  = [mdl.w_ for mdl in mdls_rolann]
-        params['test_data'] = (X_test.T, y_test)
-        mdls_bcd, _         = fit_bcd_models(X_train, y_train, mode=mode, **params)
+    # Concatenamos en vector columna
+    w_ = np.concatenate([[bias], w_orig]).reshape(-1, 1)
+    return w_
 
-        # Agregamos resultados
-        results.append((mdls_rolann, mdls_bcd))
-        old_params = f_act, lam
-    
-    # Lista de tuplas con los modelos entrenados ROLANN y BCD
-    return results
+def arrange_weights_by_split(w, p):
+    bias    = w[0]
+    w_p     = split_vfl_X(w[1:], p)
+    w_stack = np.vstack([bias, *w_p])
+    return w_stack
+
+def get_column_indexes(df, cols):
+    assert np.all([c in df.columns for c in cols])
+    indexes = df.columns.get_indexer(cols)
+    return indexes
 
 
-def load_dataset(path):
-    """Load dataset given in 'path' and returns X/y dataframes."""
-    print(f"Cargando dataset - {path} ...", end=" ")
-    df_dic = pd.read_excel(path, sheet_name=["X","y"])
-    X, y = df_dic['X'], df_dic['y']
-    print(f"Listo!\nMuestras/Variables: {X.shape} | Target: {y.shape}")
-
-    return X, y
-
-
-def check_condition(X, lam=1e-3, f_act="linear"):
-    """Checks condition number of matrix A = H H^T + lam I"""
-
-    _, f_inv, f_der = load_act_fn(f_act)
-    f_escalar = f_der(f_inv(POS_VALUE))
-
-    H = X.T * f_escalar
-    A = H @ H.T + lam * np.eye(len(X.T))
-    k_A = np.linalg.cond(A)
-    
-    return k_A
-
-
-def check_condition_lr(X, D=0.25, lam=1e-3):
-    n, m    = X.shape
-    D_diag  = np.eye(n)
-    lam_diag= np.eye(m)
-    H_lr    = X.T @ (D * D_diag) @ X + (lam * lam_diag)
-    k_Hlr   =  np.linalg.cond(H_lr) # igual a cte de Lipschitz L = 1/4 * max_eigval(X X.T) + lamI
-    return k_Hlr
-
-
-def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear", **kwargs):
-    """Computes spectral radius of the Gauss-Seidel iteration matrix M_GS (BCD ROLANN).
-    Values closer to 1 represent slow convergence. Values closer to 0 indicate fast convergen rápida."""
-
-    # Split X according to the VFL split in p
-    X_split = split_vfl_X(X.T, p)
-    # Add bias term on first Xsplit element (equiv. to first BCD client)
-    bias = np.ones(len(X)).reshape(-1,1)
-    X_split[0] = np.hstack([bias , X_split[0].T]).T
-    X_ordered_T = np.vstack(X_split)  # (m, n)
-    m = X_ordered_T.shape[0]
-
-    # Build matrix A = H @ H.T + lam * I
-    _, f_inv, f_der = load_act_fn(f_act)
-    f_escalar = f_der(f_inv(POS_VALUE))
-    H = X_ordered_T * f_escalar
-    A = H @ H.T + lam * np.eye(m)
-    
-    # Decompose A in D, L, U blocks
-    D = np.zeros_like(A)
-    L = np.zeros_like(A)
-    U = np.zeros_like(A)
-    
-    # VFL block sizes (m_i)
-    m_i = [X_i.shape[0] for X_i in X_split]
-    
-    start_idx = 0
-    for size in m_i:
-        end_idx = start_idx + size
-        # Diag block
-        D[start_idx:end_idx, start_idx:end_idx] = A[start_idx:end_idx, start_idx:end_idx]
-        # Lower triag. block
-        L[end_idx:, start_idx:end_idx] = A[end_idx:, start_idx:end_idx]
-        # Upper triag. block
-        U[start_idx:end_idx, end_idx:] = A[start_idx:end_idx, end_idx:]
-        
-        start_idx = end_idx
-
-    # Compute iteration matrix:
-    # we use `linalg.solve` instead of `linalg.inv` as it is more numerically robust
-    lr = kwargs.get('lr', None)
-    try:
-        if mode_bcd == 'sequential':
-            if lr == 1: # GS puro
-                M_iter = np.linalg.solve(D + L, -U)
-            else:       # SOR
-                M_iter = np.linalg.solve(D + lr * L, (1.0 - lr) * D - lr * U)
-        elif mode_bcd == 'parallel':
-            M_J = np.linalg.solve(D, -(L + U))
-            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
-        else:
-            raise ValueError(f"Modo BCD desconocido: {mode_bcd}")
-    except np.linalg.LinAlgError:
-    # we defer to a pseudo-inverse in case of linalg error (singular matrix)
-        if mode_bcd == 'sequential':
-            if lr == 1:
-                M_iter = -np.linalg.pinv(D + L) @  U
-            else:
-                M_iter = np.linalg.pinv(D + lr * L) @ ((1.0 - lr) * D - lr * U)
-        else:
-            M_J = -np.linalg.pinv(D) @ (L + U)
-            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
-
-    # Spectral radius (max abs. eigenvalue)
-    rho = np.max(np.abs(np.linalg.eigvals(M_iter)))
-
-    return rho
-
-
-def compute_max_lr_parallel(X, p, lam=1e-3, f_act="linear"):
-    """Computes the theoretical maximum learning rate of convergen for the
-    'parallel' BCD ROLANN mode (Damped Jacobi) for a given split 'p'"""
-
-    # Split X according to the VFL split in p
-    X_split = split_vfl_X(X.T, p)
-    # Add bias term on first Xsplit element (equiv. to first BCD client)
-    bias = np.ones(len(X)).reshape(-1,1)
-    X_split[0] = np.hstack([bias , X_split[0].T]).T
-    X_ordered_T = np.vstack(X_split)  # (m, n)
-    m = X_ordered_T.shape[0]
-
-    # Build matrix A = H @ H.T + lam * I
-    _, f_inv, f_der = load_act_fn(f_act)
-    f_escalar = f_der(f_inv(POS_VALUE))
-    H = X_ordered_T * f_escalar
-    A = H @ H.T + lam * np.eye(m)
-    
-    # Decompose diagonal block D
-    D = np.zeros_like(A)
-    
-    # VFL block sizes (m_i)
-    m_i = [X_i.shape[0] for X_i in X_split] 
-    
-    start_idx = 0
-    for size in m_i:
-        end_idx = start_idx + size
-        D[start_idx:end_idx, start_idx:end_idx] = A[start_idx:end_idx, start_idx:end_idx]
-        start_idx = end_idx
-
-    # Compute max eigval of matrix (D^{-1} @ A)
-    try:
-        gammas = spla.eigvals(A, D) # A v = gamma D v
-    except np.linalg.LinAlgError:
-        gammas = np.linalg.eigvals(np.linalg.solve(D, A))
-    
-    # Max learning rate
-    gamma_max = np.max(np.real(gammas))
-    lr_max = 2.0 / gamma_max
-
-    return lr_max
-
-
-def score2label(scores, labels=None):
-    """Transforms prediction scores into prediction labels for both binary and multiclass classification.
-    If no labels are given for binary classification a 0=NEG 1=POS fallback will be used.
-    Otherwise, labels should have the same length as the no. of columns in `scores` array of dim. (n, c).
-    """
-
-    # Formateamos a numpy por si viene como lista o dataframe
-    scores = np.asarray(scores)
-    
-    # Multiclase
-    if scores.ndim == 2 and scores.shape[1] > 1:
-        if scores.shape[1] != len(labels):
-            raise ValueError(f"Dimensión de scores {scores.shape} no coincide con número de clases ({len(labels)})")
-        # Obtenemos el índice de la distancia mínima a POS_VALUE
-        dist_pos = np.abs(scores - POS_VALUE)
-        indices = np.argmin(dist_pos, axis=1)
-        pred = labels[indices]
-    
-    # Binaria
-    else:
-        scores_flat = scores.ravel()
-        # Umbral como promedio entre mapeado de clases
-        threshold = 0.5 * (POS_VALUE + NEG_VALUE)
-        # Generamos índices: 1 si supera el umbral (POS), 0 si no (NEG)
-        indices = np.where(scores_flat > threshold, 1, 0)
-        if labels is None or len(labels) != 2:
-            return indices  # por si no pasan las etiquetas correctas devolvemos (1, 0)
-        
-        # Mapeamos a las etiquetas reales: labels[0] = NEG, labels[1] = POS
-        # Asumimos convención: classes[0] -> Negativo, classes[1] -> Positivo
-        pred = labels[indices]
-
-    return pred
-
+#==================
+#===[(3) Models]===
+#==================
 
 def fit_rolann_models(X_train, y_train, mode='ovr', **params):
     """Function that fits one ROLANN model (with given `params`) to the train data
@@ -383,15 +187,6 @@ def fit_rolann_models(X_train, y_train, mode='ovr', **params):
         models.append(model)
     
     return models
-
-
-def predict_models(X, models):
-    """Build prediction scores for collection of models."""
-
-    # Matriz (n x c), siendo c el nº clases o salidas
-    scores = np.hstack([mdl.predict(X) for mdl in models])
-    return scores
-
 
 def fit_bcd_models(X_train, y_train, mode='ovr', **params):
     """Function that fits BCD ROLANN models to the train data in both OvR classification
@@ -452,109 +247,53 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
     
     return lst_coords, lst_clients
 
-
-def check_correlation_weights(X, w_rolann, w_bcd, threshold=0.9, tol=1e-3):
-    """For highly correlated features, checks if the corresponding pair of weights from both the
-       centralized ROLANN solution and the BCD ROLANN solution sums the same value, implying there
-       might be two sets of different but equivalent solutions (weights).
-       X needs to be standardized."""
+def run_grid_search(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
+    """
+    Run experiments over a grid-search combination of hyperparameters.
     
-    # Aplanamos arrays y quitamos bias
-    w_c = w_rolann.flatten()[1:]
-    w_b = w_bcd.flatten()[1:]
+    param_grid = {
+        # ROLANN PARAMS
+        'f_act': ['logs'],                      # f.act.
+        'lam': [0.001, 0.01]                    # regularization
+
+        # BCD params
+        'p': [[2, 2], [4, 4]],                  # node config
+        'mode_bcd': ['parallel', 'sequential'], # modes
+        'lr': [0.5, 0.75, 1.0],                 # learning rates
+        'tol': [1e-5]                           # tolerance
+        'max_iter': [20, 50]                    # max iterations
+        ...
+    }
+    """
+
+    # Combinaciones posibles de hiperparams - prod. cartesiano
+    combinations = product_grid(param_grid)
+    print(f"Iniciando grid-search con {len(combinations)} combinaciones...")
     
-    # Calculamos Matriz de Correlación
-    corr_matrix = X.corr()
+    old_params = None   # Optim. para no repetir modelos centralizados
+    results = []
+    for i, params in enumerate(combinations):
+        print(f"--- Experimento Nº {i+1}/{len(combinations)}: {params} ---")
+        
+        # [ROLANN] solución centralizada
+        f_act       = params['f_act']
+        lam         = params['lam']
+        if (f_act, lam) != old_params:
+            t_rolann    = perf_counter()
+            mdls_rolann = fit_rolann_models(X_train, y_train, mode=mode, f_act=f_act, lam=lam)
+            print(f"ROLANN centralizado entrenado en: {perf_counter() - t_rolann:.2f} (s)")
 
-    # Análisis
-    n_features = len(corr_matrix)
-    found_issues = False
-    results = {'Par (i, j)': [], 'Columnas': [], 'Corr': [], 'W_rolann (i, j)': [], 'W_BCD (i, j)': [], 'Suma equiv?': []}
-    for i in range(n_features):
-        for j in range(i + 1, n_features):
+        # [BCD ROLANN]
+        params['w_rolann']  = [mdl.w_ for mdl in mdls_rolann]
+        params['test_data'] = (X_test.T, y_test)
+        mdls_bcd, _         = fit_bcd_models(X_train, y_train, mode=mode, **params)
+
+        # Agregamos resultados
+        results.append((mdls_rolann, mdls_bcd))
+        old_params = f_act, lam
     
-            rho = corr_matrix.iloc[i, j]
-            if abs(rho) > threshold:
-                found_issues = True
-
-                # Recuperamos pares de pesos correspondientes
-                wc_i, wc_j = w_c[i], w_c[j]
-                wb_i, wb_j = w_b[i], w_b[j]
-                
-                # Suma de pesos (A veces el modelo reparte la suma total)
-                sum_c = wc_i + wc_j
-                sum_b = wb_i + wb_j
-                diff_sum = abs(sum_c - sum_b)
-                equiv   = diff_sum < tol
-                
-                # Guardamos resultados
-                results['Par (i, j)'].append(f"({i}, {j})")
-                results['Columnas'].append(f"{corr_matrix.columns[i]} | {corr_matrix.columns[j]}")
-                results['Corr'].append(rho)
-                results['W_rolann (i, j)'].append(f"({wc_i:.3f}, {wc_j:.3f})")
-                results['W_BCD (i, j)'].append(f"({wb_i:.3f}, {wb_j:.3f})")
-                results['Suma equiv?'].append(equiv)
-    if not found_issues:
-        print("No se encontraron pares de variables con alta correlación.")
-
-    return pd.DataFrame.from_dict(results)
-
-
-def combine_multioutput_dfs(dfs):
-    sum_columns = ['diff_w', 'diff_Z', 'diff_w_rolann', 'time', 'time_setup']
-    stt_columns = ['max_iter', 'tol', 'lr', 'mode', 'iter']
-
-    sum_df = sum(df[sum_columns] for df in dfs)
-    stt_df = dfs[0][stt_columns]
-    df_combined = pd.concat([sum_df, stt_df], axis=1)
-    return df_combined
-
-
-def communication_costs(k, p, n, size_bytes=8, c=1, out='bytes'):
-
-    iters = np.arange(1, k+1) if isinstance(k, int) else k
-    comm_costs = iters * p * n * size_bytes * c
-    if out == 'megabytes':
-        comm_costs = comm_costs * 1e-6
-    elif out  == 'gigabytes':
-        comm_costs = comm_costs* 1e-9
-    return pd.Series(comm_costs, name=out)
-
-
-def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=None):
-
-    Xtest, ytest    = test_data
-    Xtrain, ytrain  = train_data
-
-    df_wi = pd.concat([df.w_i for df in dfs], axis=1)
-    df_wi.columns = [f"w_{i+1}" for i in range(len(dfs))]
-
-    f, _,  _ = load_act_fn(f_act)
-    Xp_test  = np.vstack([np.ones((1, Xtest.shape[1])), Xtest])
-    Xp_train = np.vstack([np.ones((1, Xtrain.shape[1])), Xtrain])
-
-    df_scores = [df[['score_test', 'score_train']].rename(columns={'score_test': f'score_test_{i+1}',
-                                                                   'score_train': f'score_train_{i+1}'}) 
-                 for i, df in enumerate(dfs)]
-    df_scores = pd.concat(df_scores, axis=1)
-    for iter, wi in df_wi.iterrows():
-        score_test  = np.vstack([f(w.T @ Xp_test) for w in wi])
-        score_train = np.vstack([f(w.T @ Xp_train) for w in wi])
-        if labels is not None:
-            ypred_test  = score2label(score_test.T, labels)
-            ypred_train = score2label(score_train.T, labels)
-        else:
-            ypred_test  = score_test.T
-            ypred_train = score_train.T
-
-        acc_test = skmetricfn(ytest, ypred_test)
-        acc_train = skmetricfn(ytrain, ypred_train)
-        df_scores.loc[iter, 'score_test'] = acc_test
-        df_scores.loc[iter, 'score_train'] = acc_train
-    
-    df_scores['iter'] = df_scores.index + 1
-    return df_scores
-
+    # Lista de tuplas con los modelos entrenados ROLANN y BCD
+    return results
 
 def fit_lr_models(X_train, y_train, mode='ovr', **params):
     """Function that fits a LogisticRegression|Ridge model (with given `params`) to the
@@ -582,7 +321,6 @@ def fit_lr_models(X_train, y_train, mode='ovr', **params):
     model.w_ = w
     
     return [model]  # Por uniformizar tipo devuelto con fit_bcd_models... será lista con 1 elemento
-
 
 def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     """Function that fits LR VFL models to the train data in both OvR and binary
@@ -644,7 +382,6 @@ def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     
     return lst_coords, lst_clients
 
-
 def run_grid_search_lr(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
     """
     Run experiments over a grid-search combination of hyperparameters in a LR/Ridge VFL scenario.
@@ -697,14 +434,6 @@ def run_grid_search_lr(X_train, y_train, X_test, y_test, param_grid, mode='ovr')
     # Lista de tuplas con los modelos entrenados LR y VFL LR
     return results
 
-
-def optimality_gap(loss, min_loss=None, percentage=False):
-    lb = min_loss if min_loss is not None else loss.min()   # TODO: coerce? and min_loss < loss.min()
-    opt_gap = loss - lb
-    if percentage:  opt_gap = opt_gap / lb * 100
-    return opt_gap
-
-
 def product_grid(bcd_grid):
     """Función auxiliar para obtener el producto cartesiano de los hiperparametros
        de una búsqueda en cuadricula (grid-search) para BCD ROLANN que solo produce
@@ -731,6 +460,68 @@ def product_grid(bcd_grid):
     return par_combinations + seq_combinations
 
 
+#===================
+#===[(4) Results]===
+#===================
+
+def score2label(scores, labels=None, f_act='logs'):
+    """Transforms prediction scores into prediction labels for both binary and multiclass classification.
+    If no labels are given for binary classification a 0=NEG 1=POS fallback will be used.
+    Otherwise, labels should have the same length as the no. of columns in `scores` array of dim. (n, c).
+    """
+
+    # Formateamos a numpy por si viene como lista o dataframe
+    scores = np.asarray(scores)
+    _, negpos_tuple = map_labels(f_act)
+
+    # Multiclase
+    if scores.ndim == 2 and scores.shape[1] > 1:
+        if scores.shape[1] != len(labels):
+            raise ValueError(f"Dimensión de scores {scores.shape} no coincide con número de clases ({len(labels)})")
+        # Obtenemos el índice de la distancia mínima a POS_VALUE
+        dist_pos = np.abs(scores - negpos_tuple[1])
+        indices = np.argmin(dist_pos, axis=1)
+        pred = labels[indices]
+    
+    # Binaria
+    else:
+        scores_flat = scores.ravel()
+        # Umbral como promedio entre mapeado de clases
+        threshold = 0.5 * sum(negpos_tuple)
+        # Generamos índices: 1 si supera el umbral (POS), 0 si no (NEG)
+        indices = np.where(scores_flat > threshold, 1, 0)
+        if labels is None or len(labels) != 2:
+            return indices  # por si no pasan las etiquetas correctas devolvemos (1, 0)
+        
+        # Mapeamos a las etiquetas reales: labels[0] = NEG, labels[1] = POS
+        # Asumimos convención: classes[0] -> Negativo, classes[1] -> Positivo
+        pred = labels[indices]
+
+    return pred
+
+def predict_models(X, models):
+    """Build prediction scores for collection of models."""
+
+    # Matriz (n x c), siendo c el nº clases o salidas
+    scores = np.hstack([mdl.predict(X) for mdl in models])
+    return scores
+
+def communication_costs(k, p, n, size_bytes=8, c=1, out='bytes'):
+
+    iters = np.arange(1, k+1) if isinstance(k, int) else k
+    comm_costs = iters * p * n * size_bytes * c
+    if out == 'megabytes':
+        comm_costs = comm_costs * 1e-6
+    elif out  == 'gigabytes':
+        comm_costs = comm_costs* 1e-9
+    return pd.Series(comm_costs, name=out)
+
+def optimality_gap(loss, min_loss=None, percentage=False):
+    lb = min_loss if min_loss is not None else loss.min()   # TODO: coerce? and min_loss < loss.min()
+    opt_gap = loss - lb
+    if percentage:  opt_gap = opt_gap / lb * 100
+    return opt_gap
+
 def total_time(df, rolann=True):
     # Valor tiempo preprocesado + suma acumulada de tiempos de iteración
 
@@ -742,21 +533,6 @@ def total_time(df, rolann=True):
         total += setup.groupby(groups).transform('first')
     
     return total
-
-
-def merge_df_gridsearch(exps, name=None):
-    # Separamos modelos resultado del GridSearch en ROLANN y BCD ROLANN
-    lst_rolann, lst_bcd = list(zip(*exps))
-
-    # Obtenemos resultados de cada ejecución
-    lst_rolann = list(itertools.chain(*lst_rolann))
-    lst_bcd = list(itertools.chain(*lst_bcd))
-    df_bcd = [coord.get_results(name=name) for coord in lst_bcd]
-
-    # Concatenamos los resultados en un único dataframe global
-    df = pd.concat(df_bcd)
-    return df
-
 
 def compute_extra_results(df, w_optim=None, rolann=True, **kwargs):
     
@@ -775,34 +551,189 @@ def compute_extra_results(df, w_optim=None, rolann=True, **kwargs):
 
     return df
 
+def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=None):
 
-def balance_train_data(X_train, y_train, random_state=1):
-    # Aplica under-sampling aleatorio para igualar las clases en el conjunto de entrenamiento
-    np.random.seed(random_state)
-    
-    # Proporcion de clases
-    proportion = y_train.value_counts(normalize=True, ascending=True)
-    minority_class = proportion.index[0][0]
-    majority_class = proportion.index[1][0]
-    print(f"Desequilibrio de clases dataset:\n{proportion}")
-    print(f"Clase minoritaria: {minority_class}, clase mayoritaria: {majority_class}")
+    Xtest, ytest    = test_data
+    Xtrain, ytrain  = train_data
 
-    # Encontramos los índices de ambas clases (ilocs)
-    idx_minority = np.where(y_train == minority_class)[0]
-    idx_majority = np.where(y_train == majority_class)[0]
+    df_wi = pd.concat([df.w_i for df in dfs], axis=1)
+    df_wi.columns = [f"w_{i+1}" for i in range(len(dfs))]
+
+    f, _,  _ = load_act_fn(f_act)
+    Xp_test  = np.vstack([np.ones((1, Xtest.shape[1])), Xtest])
+    Xp_train = np.vstack([np.ones((1, Xtrain.shape[1])), Xtrain])
+
+    df_scores = [df[['score_test', 'score_train']].rename(columns={'score_test': f'score_test_{i+1}',
+                                                                   'score_train': f'score_train_{i+1}'}) 
+                 for i, df in enumerate(dfs)]
+    df_scores = pd.concat(df_scores, axis=1)
+    for iter, wi in df_wi.iterrows():
+        score_test  = np.vstack([f(w.T @ Xp_test) for w in wi])
+        score_train = np.vstack([f(w.T @ Xp_train) for w in wi])
+        if labels is not None:
+            ypred_test  = score2label(score_test.T, labels)
+            ypred_train = score2label(score_train.T, labels)
+        else:
+            ypred_test  = score_test.T
+            ypred_train = score_train.T
+
+        acc_test = skmetricfn(ytest, ypred_test)
+        acc_train = skmetricfn(ytrain, ypred_train)
+        df_scores.loc[iter, 'score_test'] = acc_test
+        df_scores.loc[iter, 'score_train'] = acc_train
     
-    # Contamos los casos de la clase minoritaria
-    n_minority = len(idx_minority)
+    df_scores['iter'] = df_scores.index + 1
+    return df_scores
+
+def merge_df_gridsearch(exps, name=None):
+    # Separamos modelos resultado del GridSearch en ROLANN y BCD ROLANN
+    lst_rolann, lst_bcd = list(zip(*exps))
+
+    # Obtenemos resultados de cada ejecución
+    lst_rolann = list(itertools.chain(*lst_rolann))
+    lst_bcd = list(itertools.chain(*lst_bcd))
+    df_bcd = [coord.get_results(name=name) for coord in lst_bcd]
+
+    # Concatenamos los resultados en un único dataframe global
+    df = pd.concat(df_bcd)
+    return df
+
+
+#=======================
+#===[(5) Convergence]===
+#=======================
+
+def check_condition(X, lam=1e-3, f_act="linear"):
+    """Checks condition number of matrix A = H H^T + lam I"""
+
+    _, f_inv, f_der = load_act_fn(f_act)
+    _, negpos_tuple = map_labels(f_act)
+    f_escalar = f_der(f_inv(negpos_tuple[0]))
+
+    H = X.T * f_escalar
+    A = H @ H.T + lam * np.eye(len(X.T))
+    k_A = np.linalg.cond(A)
     
-    # Seleccionamos aleatoriamente la misma cantidad de la clase mayoritaria
-    idx_majority_downsampled = np.random.choice(idx_majority, size=n_minority, replace=False)
+    return k_A
+
+def check_condition_lr(X, D=0.25, lam=1e-3):
+    n, m    = X.shape
+    D_diag  = np.eye(n)
+    lam_diag= np.eye(m)
+    H_lr    = X.T @ (D * D_diag) @ X + (lam * lam_diag)
+    k_Hlr   =  np.linalg.cond(H_lr) # igual a cte de Lipschitz L = 1/4 * max_eigval(X X.T) + lamI
+    return k_Hlr
+
+def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear", **kwargs):
+    """Computes spectral radius of the Gauss-Seidel iteration matrix M_GS (BCD ROLANN).
+    Values closer to 1 represent slow convergence. Values closer to 0 indicate fast convergen rápida."""
+
+    # Split X according to the VFL split in p
+    X_split = split_vfl_X(X.T, p)
+    # Add bias term on first Xsplit element (equiv. to first BCD client)
+    bias = np.ones(len(X)).reshape(-1,1)
+    X_split[0] = np.hstack([bias , X_split[0].T]).T
+    X_ordered_T = np.vstack(X_split)  # (m, n)
+    m = X_ordered_T.shape[0]
+
+    # Build matrix A = H @ H.T + lam * I
+    _, f_inv, f_der = load_act_fn(f_act)
+    _, negpos_tuple = map_labels(f_act)
+    f_escalar = f_der(f_inv(negpos_tuple[0]))
+
+    H = X_ordered_T * f_escalar
+    A = H @ H.T + lam * np.eye(m)
     
-    # Juntamos los índices y los mezclamos para que no queden ordenados
-    idx_balanced = np.concatenate([idx_minority, idx_majority_downsampled])
-    np.random.shuffle(idx_balanced)
+    # Decompose A in D, L, U blocks
+    D = np.zeros_like(A)
+    L = np.zeros_like(A)
+    U = np.zeros_like(A)
     
-    # Extraemos el nuevo conjunto de balanceado (50/50)
-    X_train_balanced = X_train.iloc[idx_balanced]
-    y_train_balanced = y_train.iloc[idx_balanced]
+    # VFL block sizes (m_i)
+    m_i = [X_i.shape[0] for X_i in X_split]
     
-    return X_train_balanced, y_train_balanced
+    start_idx = 0
+    for size in m_i:
+        end_idx = start_idx + size
+        # Diag block
+        D[start_idx:end_idx, start_idx:end_idx] = A[start_idx:end_idx, start_idx:end_idx]
+        # Lower triag. block
+        L[end_idx:, start_idx:end_idx] = A[end_idx:, start_idx:end_idx]
+        # Upper triag. block
+        U[start_idx:end_idx, end_idx:] = A[start_idx:end_idx, end_idx:]
+        
+        start_idx = end_idx
+
+    # Compute iteration matrix:
+    # we use `linalg.solve` instead of `linalg.inv` as it is more numerically robust
+    lr = kwargs.get('lr', None)
+    try:
+        if mode_bcd == 'sequential':
+            if lr == 1: # GS puro
+                M_iter = np.linalg.solve(D + L, -U)
+            else:       # SOR
+                M_iter = np.linalg.solve(D + lr * L, (1.0 - lr) * D - lr * U)
+        elif mode_bcd == 'parallel':
+            M_J = np.linalg.solve(D, -(L + U))
+            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
+        else:
+            raise ValueError(f"Modo BCD desconocido: {mode_bcd}")
+    except np.linalg.LinAlgError:
+    # we defer to a pseudo-inverse in case of linalg error (singular matrix)
+        if mode_bcd == 'sequential':
+            if lr == 1:
+                M_iter = -np.linalg.pinv(D + L) @  U
+            else:
+                M_iter = np.linalg.pinv(D + lr * L) @ ((1.0 - lr) * D - lr * U)
+        else:
+            M_J = -np.linalg.pinv(D) @ (L + U)
+            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
+
+    # Spectral radius (max abs. eigenvalue)
+    rho = np.max(np.abs(np.linalg.eigvals(M_iter)))
+
+    return rho
+
+def compute_max_lr_parallel(X, p, lam=1e-3, f_act="linear"):
+    """Computes the theoretical maximum learning rate of convergen for the
+    'parallel' BCD ROLANN mode (Damped Jacobi) for a given split 'p'"""
+
+    # Split X according to the VFL split in p
+    X_split = split_vfl_X(X.T, p)
+    # Add bias term on first Xsplit element (equiv. to first BCD client)
+    bias = np.ones(len(X)).reshape(-1,1)
+    X_split[0] = np.hstack([bias , X_split[0].T]).T
+    X_ordered_T = np.vstack(X_split)  # (m, n)
+    m = X_ordered_T.shape[0]
+
+    # Build matrix A = H @ H.T + lam * I
+    _, f_inv, f_der = load_act_fn(f_act)
+    _, negpos_tuple = map_labels(f_act)
+    f_escalar = f_der(f_inv(negpos_tuple[0]))
+
+    H = X_ordered_T * f_escalar
+    A = H @ H.T + lam * np.eye(m)
+    
+    # Decompose diagonal block D
+    D = np.zeros_like(A)
+    
+    # VFL block sizes (m_i)
+    m_i = [X_i.shape[0] for X_i in X_split] 
+    
+    start_idx = 0
+    for size in m_i:
+        end_idx = start_idx + size
+        D[start_idx:end_idx, start_idx:end_idx] = A[start_idx:end_idx, start_idx:end_idx]
+        start_idx = end_idx
+
+    # Compute max eigval of matrix (D^{-1} @ A)
+    try:
+        gammas = spla.eigvals(A, D) # A v = gamma D v
+    except np.linalg.LinAlgError:
+        gammas = np.linalg.eigvals(np.linalg.solve(D, A))
+    
+    # Max learning rate
+    gamma_max = np.max(np.real(gammas))
+    lr_max = 2.0 / gamma_max
+
+    return lr_max

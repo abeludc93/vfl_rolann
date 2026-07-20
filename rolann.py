@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: UTF-8 -*-
 """
-rolann
+rolann.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Implementación básica del entrenamiento, computo de pesos óptimos 
 (solución) y predicción del algoritmo ROLANN original.

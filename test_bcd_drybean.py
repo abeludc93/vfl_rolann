@@ -121,7 +121,14 @@ df_bcd2 = [coord.get_results() for coord in coords2]
 #==========================================================================================================
 from plotters import plot_diff, plot_score, plot_mode_diffs, plot_mode_scores, plot_correlation_map, plot_weights_comparison, plot_communication_costs, plot_score_global, plot_time_scores
 from helpers import combine_multioutput_dfs, check_correlation_weights, obtain_global_scores, communication_costs
+def combine_multioutput_dfs(dfs):
+    sum_columns = ['diff_w', 'diff_Z', 'diff_w_rolann', 'time', 'time_setup']
+    stt_columns = ['max_iter', 'tol', 'lr', 'mode', 'iter']
 
+    sum_df = sum(df[sum_columns] for df in dfs)
+    stt_df = dfs[0][stt_columns]
+    df_combined = pd.concat([sum_df, stt_df], axis=1)
+    return df_combined
 #%% Conseguimos score global de test y train para cada iteracion
 from sklearn.metrics import accuracy_score
 
@@ -141,7 +148,10 @@ df_scores['comm'] = communication_costs(k, p, n, size_bytes=8, c=len(labels), ou
 plot_communication_costs(df_scores, out='MB')
 
 #%% Visualización frente a tiempo
+
 df_sum = combine_multioutput_dfs(df_bcd)
+
+
 plot_time_scores(df_sum.merge(df_scores, on='iter'))
 
 # %% Diferencias diff_w, diff_z y diff_w_rolann:

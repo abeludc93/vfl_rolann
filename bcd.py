@@ -131,7 +131,7 @@ class BCDCoordinator:
         self.test_data  = test_data     # Tupla con (X_test, d_test) para evaluación y gráficas
         self.w_rolann   = w_rolann      # Solución óptima ROLANN para estudio y gráficas
 
-    def fit(self, max_iter=20, tol=1e-3, lr=0.75, mode='parallel', init='zero', lr_heur=False, **kwargs):
+    def fit(self, max_iter=20, tol=1e-3, lr=0.75, mode='parallel', init='zero', heur=False, **kwargs):
         print(f"Iniciando {self.__class__.__name__} ({mode})...")
         
         # [RESET/SETUP]
@@ -143,7 +143,7 @@ class BCDCoordinator:
         self._precompute_clients()
 
         # [INIT]        # Inicializamos historial y variables para el bucle BCD_ROLANN
-        self._init_history(max_iter, tol, lr, mode, init, lr_heur, (perf_counter()-t_setup))
+        self._init_history(max_iter, tol, lr, mode, init, heur, (perf_counter()-t_setup))
         d_bar, Z, z_dict = self._init_params(init)
         w = self._init_weights(init)
 
@@ -159,16 +159,15 @@ class BCDCoordinator:
                 # [Modo paralelo. Estilo Jacobi]
                 Z, z_dict = self._sequential_iteration(d_bar, Z, z_dict, lr)
 
-            # Información de la iteración y métricas
-            w = np.concatenate([c.w for c in self.clients])
-            diff_Z = self._update_history(w, w_iter, Z, Z_iter, lr, (perf_counter() - t_iter))
+            # Información de la iteración y métricas para historial
+            w, diff_Z = self._update_history(w_iter, Z_iter, Z, lr, (perf_counter()-t_iter))
 
             # Criterio de parada y progreso
             if self._check_stop(iter, max_iter, diff_Z, tol):
                 break
                 
             # Heuristica convergencia (factor amortiguación 'lr')
-            if lr_heur and mode == 'parallel':
+            if heur and mode == 'parallel':
                 lr = self._check_heuristic(lr, iter, diff_Z, **kwargs)
             
         # Guardamos pesos finales
@@ -210,7 +209,7 @@ class BCDCoordinator:
 
         return score
 
-    # [Funciones protegidas para fit():-> sobreescribir en clases hijas para modificar su comportamiento]
+    # [Funciones protegidas para fit(): sobreescribir en clases hijas para modificar su comportamiento]
     def _reset(self, hard=False):
         if hasattr(self, '_i_lr'):          delattr(self, '_i_lr')
         if hasattr(self, '_diff_Z_old'):    delattr(self, '_diff_Z_old')
@@ -221,8 +220,7 @@ class BCDCoordinator:
             client.precompute()
     
     def _get_Z_for_metrics(self, Z):
-        # Por defecto, Z es directamente utilizable
-        return Z
+        return Z    # Por defecto, Z es un array de datos en claro
 
     def _init_history(self, max_iter, tol, mode, init, lr_heur, t_setup):
         # Historial para metricas y monitorizacion bucle 
@@ -230,16 +228,16 @@ class BCDCoordinator:
                         'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
         # Info estática sobre la ejecución
         self.hparams = {'max_iter': max_iter, 'tol': tol, 'mode': mode, 'init': init,
-                        'p': len(self.clients), 'lr_heur': lr_heur, 'time_setup': t_setup}
+                        'p': len(self.clients), 'heur': lr_heur, 'time_setup': t_setup}
 
     def _init_params(self, init):
-        # Carga de f_act y calculo d_bar
+        # Carga de f_act y calculo $d_bar = f'(f^{-1}(d))$
         map_fn, _ = map_labels(self.f_act)      # mapeo de clases en caso de clasif.
         d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         _, f_inv, _ = load_act_fn(self.f_act)
         d_bar = f_inv(d)
 
-        # Inicialización de Z: un init aleatorio enmascara el $d_bar^{-1}$ en la 1era iter
+        # Inicialización de Z: un init aleatorio enmascara el $d_bar$ en la 1era iter
         Z = np.zeros_like(d) if init == 'zero' else np.random.rand(d.shape)
 
         # Inicializamos dict con inputs netos de los clientes 
@@ -248,6 +246,7 @@ class BCDCoordinator:
         return d_bar, Z, z_dict
     
     def _init_weights(self, init):
+        # Inicializa con zeros o valores aleatorios el vector columna de pesos finales
         m = sum([len(c.w) for c in self.clients])
         w = np.zeros([m, 1]) if init == 'zero' else np.random.rand(m, 1)
         return w
@@ -289,11 +288,13 @@ class BCDCoordinator:
     
         return Z, z_dict
 
-    def _update_history(self, w, w_iter, Z, Z_iter, lr, t_iter):
-        
-        Z_metric = self._get_Z_for_metrics(Z)
-        w = np.concatenate([c.w for c in self.clients])         # solución iter
-        diff_w = np.linalg.vector_norm(w - w_iter)              # respecto a iter anterior
+    def _update_history(self, w_iter, Z_iter, Z, lr, t_iter):
+        # Guarda la información relevante de la iteracion:
+        # datos de convergencia, métricas y tiempo transcurrido
+
+        w = np.concatenate([c.w for c in self.clients])         # pesos iter
+        diff_w = np.linalg.vector_norm(w - w_iter)              # respecto a pesos anteriores
+        Z_metric = self._get_Z_for_metrics(Z)                   # residuo iter
         diff_Z = np.linalg.vector_norm(Z_metric - Z_iter)       # respecto a residuos anteriores
 
         # Info convergencia
@@ -323,16 +324,16 @@ class BCDCoordinator:
         return w, diff_Z
 
     def _check_stop(self, iter, max_iter, diff_Z, tol):
-        # Log iters
+        # Log del progreso del bucle (iteraciones)
         if ((iter+1) % round(max_iter / 4)) == 0 or (iter + 1) == max_iter or diff_Z < tol:
             print(f"Iter {iter+1}: Diff Z = {diff_Z:.4f}")
-        # Criterio de parada
+        # Criterio de parada: tolerancia dada
         if stop := diff_Z < tol:
             print("Convergencia alcanzada.")
         return stop
     
     def _check_heuristic(self, lr, iter, diff_Z, **kwargs):
-        # Init contadores
+        # Init contadores auxiliares para fase transitoria y ruido numerico
         if not hasattr(self, '_i_lr'):          self._iter_lr = 0
         if not hasattr(self, '_diff_Z_old'):    self._diff_Z_old = 0
 
@@ -343,7 +344,7 @@ class BCDCoordinator:
         tol_lr      = kwargs.get('tol_lr', .05)         # evita activar la heuristica por ruido en la aprox de $\rho$
         min_diff_Z  = kwargs.get('min_diff_Z', 1e-8)    # idem por ruido numérico por divisiones pequeñas
         transient   = kwargs.get('transient', 15)       # duracion en iteraciones de la fase transitoria para la aprox de $\rho$
-        beta_lr     = kwargs.get('beta_lr', .8)
+        beta_lr     = kwargs.get('beta_lr', .8)         # factor "conservador" sobre lr_max
 
         if  1 < transient < self._iter_lr and self._diff_Z_old > min_diff_Z:
             rho_emp = diff_Z / self._diff_Z_old
