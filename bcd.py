@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-# -*- coding: UTF-8 -*-
 """
 bcd.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Implementación de cliente y coordinador tipo BCD para VFL con ROLANN.
+Implementación de cliente y coordinador para VFL con ROLANN.
 Ojo! Importante!
-Hay dos pares de clases (BCDClient, BCDCoordinator) y (BCDClient_alt, BCDCoordinator_alt).
+Hay cuatro pares de clases:
+    1. (BCDClient, BCDCoordinator)
+    2. (BCDClient_par, BCDCoordinator_par)
+    3. (BCDClient_fhe, BCDCoordinator_fhe)
+    4. (BCDClient_sec, BCDCoordinator_sec)
+
 Son equivalentes y producen los mismos resultados.
+(1) implementa BCD_ROLANN según la propuesta original descrita en el documento 'VFL_FedHEONN.pdf'.
+(2) añade una paralelización real de los clientes (joblib) en el modo 'parallel'.
+(3) añade protocolo FHE en las comunicaciones cliente y coordinador.
+(4) añade protocolo SecureAggregation en las comunicaciones cliente y coordinador.
 
-El 1er par implementa BCD según las ecuaciones descritas en el documento 'VFL_FedHEONN.pdf'.
+Como los bloques fundamentales del algoritmo son compartidos, (1) forma una base de la que heredan
+el resto de variaciones.
 
-El 2º hace lo mismo pero reemplazando operaciones matriciales @ y multiplicación de matrices
-diagonales por operaciones tipo Hadamard (con numpy broadcasting) con vectores. Además, también
-implementa una paralelización real de los clientes (librería joblib) en el bucle BCD 'parallel',
-por lo que es la opción preferida para cronometrar tiempos de ejecución realistas.
-
+HERENCIAS Cliente/Coordinador
+(1) -> (2)  -> (3)
+            -> (4)
 """
 from math import sqrt
 from time import perf_counter
@@ -158,7 +165,7 @@ class BCDCoordinator:
         map_fn, _ = map_labels(self.f_act)      # mapeo de clases en caso de clasif.
         d = map_fn(self.d).reshape([-1, 1])     # reshape para vector columna
         f, f_inv, _ = load_act_fn(self.f_act)
-        d_bar = f_inv(d)  
+        d_bar = f_inv(d)
 
         # Inicialización de Z y w:
         # todos los w_i empiezan en 0 -> podemos empezar con un Z aleatorio para enmascarar d_bar^-1 en la 1era iter
@@ -257,7 +264,6 @@ class BCDCoordinator:
         else:
             return None
 
-    
     def reset(self, hard=False):
         [client.reset(hard) for client in self.clients];
 
