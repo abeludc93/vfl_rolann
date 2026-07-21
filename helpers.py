@@ -20,7 +20,7 @@ import pandas as pd
 from scipy import linalg as spla
 from sklearn.linear_model import LogisticRegression, Ridge
 # Application-modules
-from bcd import BCDClient, BCDCoordinator
+from bcd import BCDClient, BCDCoordinator, BCDClient_par, BCDCoordinator_par, BCDClient_fhe, BCDCoordinator_fhe, BCDClient_sec, BCDCoordinator_sec
 from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_loss_log, compute_loss_linear
 from rolann import ROLANN, compute_loss_J_w
 from activation_functions import load_act_fn, map_labels
@@ -31,7 +31,7 @@ from activation_functions import load_act_fn, map_labels
 #====================
 
 def load_dataset(path):
-    """Load dataset given in 'path' and returns X/y dataframes."""
+    # Load dataset given in 'path' and returns X/y dataframes
     print(f"Cargando dataset - {path} ...", end=" ")
     df_dic = pd.read_excel(path, sheet_name=["X","y"])
     X, y = df_dic['X'], df_dic['y']
@@ -40,7 +40,7 @@ def load_dataset(path):
     return X, y
 
 def balance_train_data(X_train, y_train, random_state=1):
-    # Aplica under-sampling aleatorio para igualar las clases en el conjunto de entrenamiento
+    # Aplica under-sampling aleatorio para igualar las clases del conjunto de entrenamiento
     np.random.seed(random_state)
     
     # Proporcion de clases
@@ -90,8 +90,9 @@ def split_vfl_X(X, p):
     
     start = 0
     if type(p) == int:
+        # Validation
         if p > m: raise ValueError(f"({p}) no puede ser mayor que m ({m})")
-        
+
         m_i = m // p    # Nº variables por nodo
         r   = m % p     # Resto (se las lleva el último nodo)
 
@@ -103,6 +104,7 @@ def split_vfl_X(X, p):
             start = end
 
     elif type(p) == list:
+        # Validation
         if sum(p) != m: raise ValueError(f"Suma de p ({sum(p)}) no es igual a m ({m})")
         
         for m_p in p:
@@ -112,8 +114,10 @@ def split_vfl_X(X, p):
             start = end
 
     elif type(p) == dict:
+        # Validation
         len_m_p = [len(m_p) for m_p in p.values()]
         if sum(len_m_p) != m: raise ValueError(f"Suma de valores p ({sum(len_m_p)}) no es igual a m ({m})")
+        
         m_p_cols = []
         for m_p in p.values():
             X_i = X[m_p]
@@ -123,14 +127,18 @@ def split_vfl_X(X, p):
     else:
         raise TypeError(f"Fórmato erroneo (int|list|dict): {type(p)}")
 
+    # Validate generated split: if rearranged, it should be equal to the original data 
     if type(p) == dict:
         assert np.array_equal(X[m_p_cols], np.concatenate(X_lst))
     else:
         assert np.array_equal(X, np.concatenate(X_lst))
+    
     return X_lst
 
 def disarrange_weights_by_split(w_coord, p_dict):
-    
+    # Reordena los pesos finales del coordinador (`w_`) dado un cierto tipo de split
+    # VFL (`dict`) para su comparación con los pesos de la versión centralizada ROLANN.
+
     # Extraemos bias (suponemos 1er nodo) y resto de pesos
     w_coord_flt = w_coord.flatten()
     bias, weights = w_coord_flt[0], w_coord_flt[1:]
@@ -140,19 +148,31 @@ def disarrange_weights_by_split(w_coord, p_dict):
     
     # Índices de las columnas en el split vertical de `p_dict`
     split_w_idx = [idx for sublist in list(p_dict.values()) for idx in sublist]
-    w_orig[split_w_idx] = weights   # las colocamos ordenadas
+    
+    # Las colocamos ordenadas
+    w_orig[split_w_idx] = weights
 
     # Concatenamos en vector columna
     w_ = np.concatenate([[bias], w_orig]).reshape(-1, 1)
+
     return w_
 
 def arrange_weights_by_split(w, p):
-    bias    = w[0]
-    w_p     = split_vfl_X(w[1:], p)
-    w_stack = np.vstack([bias, *w_p])
+    # Función auxiliar usada en `helpers.fit_bcd_models()` y `helpers.fit_lrvfl_models()`
+    # Hace el proceso inverso a `disarrange_weights_by_split`.
+    # Coge los pesos de la versión centralizada ROLANN (`w`) y los "adapta" al split VFL
+    # dado (`p`) para poder comparar ambas durante la monitorización realizada en el
+    # coordinador (`diff_w_rolann`)
+
+    bias    = w[0]                          # extraemos bias
+    w_p     = split_vfl_X(w[1:], p)         # ordenamos el resto de pesos según `p`
+    w_stack = np.vstack([bias, *w_p])       # colocamos resultados en un nuevo vector
+
     return w_stack
 
 def get_column_indexes(df, cols):
+    # Devuelve los índices de las columnas `cols` del dataframe `df`.
+    # Fn. aux. usada en los ejemplos con conjuntos de datos "no tabulares" (MNIST, etc.)
     assert np.all([c in df.columns for c in cols])
     indexes = df.columns.get_indexer(cols)
     return indexes
@@ -163,8 +183,17 @@ def get_column_indexes(df, cols):
 #==================
 
 def fit_rolann_models(X_train, y_train, mode='ovr', **params):
-    """Function that fits one ROLANN model (with given `params`) to the train data
-    in case of a OvR classification task or multi-output regression."""
+    """
+    Function that fits a ROLANN model (with given `params`) to the train data.
+    It can handle both binary classification and single-output regression tasks.
+    In case of multi-output regression or multi-label classifation, an OvR
+    strategy will be adopted, resulting in N separate models.
+    
+    :param  X_train, y_train (labels should be 1 or 0 for clasif.) (dataset :np.array)
+            mode 'binary' | 'regression' | 'ovr' | 'multi'  (:string)
+            params extra settings for ROLANN (:dict)
+    :return models (:list)
+    """
 
     # Manejo de clasificación tipo OvR y regresión múltiple
     def _yield_target(y, mode='ovr'):
@@ -189,45 +218,66 @@ def fit_rolann_models(X_train, y_train, mode='ovr', **params):
     return models
 
 def fit_bcd_models(X_train, y_train, mode='ovr', **params):
-    """Function that fits BCD ROLANN models to the train data in both OvR classification
-    tasks and multi-output regression. {`params`} contains both ROLANN hyperparameters as
-    well as BCD-related train parameters."""
+    """
+    Function that fit a BCD_ROLANN model (with given `params`) to the train data
+    for a given VFL scenario (`p`). It can handle both binary classification and
+    single-output regression tasks. In case of multi-output regression or multi-
+    label classifation, an OvR strategy will be adopted, resulting in N separate
+    models. 
+    
+    :param  X_train, y_train (labels should be 1 or 0 for clasif.) (dataset :np.array)
+            mode 'binary' | 'regression' | 'ovr' | 'multi'  (:string)
+            params BCD_ROLANN hyperparameters anv VFL scenario settings (:dict)
+    :return tuple with lists of BCD_ROLANN coordinators and clients
+    """
 
     # Params ROLANN
     f_act       = params['f_act']
     lam         = params['lam']
-
-    # Params BCD
+    # Params VFL
     p           = params['p']
+    # Params FIT
     max_iter    = params['max_iter']
     tol         = params['tol']
     lr          = params['lr']
     mode_bcd    = params['mode_bcd']
+    init        = params.get('init', 'zero')
+    heur        = params.get('heur', False)
+    heur_params = params.get('heur_params', {})
+    # PARAMS BCD_ROLANN
     w_rolann    = params['w_rolann']
     Xtest, ytest= params['test_data']
-
+    bcd_impl    = params.get('bcd_impl', 'normal')
+    ctx         = params.get('ctx', None)
+    debug       = params.get('debug', True)
+    
+    # Obtenemos implementación BCD_ROLANN para cliente y coordinador
+    Client, Coord = get_bcd_class(bcd_impl, ctx)
 
     # Dividimos 'X' para los distintos clientes
     X_lst_T = split_vfl_X(X_train.T, p)
     # EXPLICACION: cuando 'p' es un diccionario, el split puede estar desordenado
     # en relación a las variables, por lo que hay que re-ordenar los pesos
     # de la sol. centralizada (ROLANN) y las filas de Xtest (atributos)
+    # para posteriores comparaciones y métricas
     if type(p) == dict: 
-        # en verdad funciona también cuando 'p' es int|list pero evitamos ops. innecesarias
-        # w_rolann se tiene que reordenar teniendo en cuenta el 'bias' en idx[0]
+        # Reordenamos test data según split
         Xtest = np.vstack(split_vfl_X(Xtest, p))
+        # Reordenamos `w_rolann`
         for i, w_r in enumerate(w_rolann):
             w_r = arrange_weights_by_split(w_r, p)
             w_rolann[i] = w_r
 
-    # Preparamos targets 'y' en caso de clasificación OvR
+    # Adecuamos salidas/targets `y` a la tarea:
     if mode == 'ovr':
-        classes = np.unique(y_train) 
+        # En caso de 'ovr' hacemos one-hot sobre `y`
+        classes = np.unique(y_train)
         assert len(classes) == len(np.unique(ytest))    # mismas clases en train que en test
         y_target = np.hstack([(y_train == cls).astype(int) for cls in classes])
         y_test = np.hstack([(ytest == cls).astype(int) for cls in classes])
     else:
-        # mode = 'binary' o 'regression' o 'multioutput'
+        # En el resto de casos ('binary' | 'regression' | 'multioutput')
+        # solo aseguramos forma de vector columna
         y_target = y_train if y_train.ndim > 1 else y_train.reshape([-1, 1])
         y_test = ytest if ytest.ndim > 1 else ytest.reshape([-1, 1])
 
@@ -235,33 +285,38 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
     num_nodos = len(X_lst_T)
     num_outputs = y_target.shape[1]
 
-    lst_clients = [BCDClient(id=i+1, X=X_lst_T[i], f_act=f_act, lam=lam)
+    lst_clients = [Client(id=i+1, X=X_lst_T[i], f_act=f_act, lam=lam, debug=debug)
                     for i in range(num_nodos)]
-    lst_coords = [BCDCoordinator(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n])
+    lst_coords = [Coord(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n])
                   for n in range(num_outputs)]
-    
+    [c.set_ctx(ctx) for c in lst_coords if bcd_impl == 'fhe'];  # fix para introducir ctx en fhe
+
     # Fit
     for i, coord in enumerate(lst_coords):
         print(f"Entrenando BCD ROLANN para clase-salida {i+1}/{num_outputs}...")
-        coord.fit(max_iter=max_iter, tol=tol, lr=lr, mode=mode_bcd)
+        coord.fit(max_iter=max_iter, tol=tol, lr=lr, mode=mode_bcd, init=init, heur=heur, **heur_params)
     
     return lst_coords, lst_clients
 
 def run_grid_search(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
     """
-    Run experiments over a grid-search combination of hyperparameters.
+    Run BCD_ROLANN experiments over a combination of hyperparameters (grid).
     
     param_grid = {
-        # ROLANN PARAMS
+        # PARAMS ROLANN
         'f_act': ['logs'],                      # f.act.
         'lam': [0.001, 0.01]                    # regularization
 
-        # BCD params
+        # PARAMS VFL
         'p': [[2, 2], [4, 4]],                  # node config
+       
+        # PARAMS FIT
         'mode_bcd': ['parallel', 'sequential'], # modes
         'lr': [0.5, 0.75, 1.0],                 # learning rates
         'tol': [1e-5]                           # tolerance
         'max_iter': [20, 50]                    # max iterations
+
+        # PARAMS BCD
         ...
     }
     """
@@ -281,7 +336,7 @@ def run_grid_search(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
         if (f_act, lam) != old_params:
             t_rolann    = perf_counter()
             mdls_rolann = fit_rolann_models(X_train, y_train, mode=mode, f_act=f_act, lam=lam)
-            print(f"ROLANN centralizado entrenado en: {perf_counter() - t_rolann:.2f} (s)")
+            print(f"ROLANN centralizado entrenado en: {perf_counter()-t_rolann:.2f} (s)")
 
         # [BCD ROLANN]
         params['w_rolann']  = [mdl.w_ for mdl in mdls_rolann]
@@ -292,13 +347,19 @@ def run_grid_search(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
         results.append((mdls_rolann, mdls_bcd))
         old_params = f_act, lam
     
-    # Lista de tuplas con los modelos entrenados ROLANN y BCD
+    # Lista de tuplas con los modelos entrenados ROLANN y BCD_ROLANN (Coord)
     return results
 
 def fit_lr_models(X_train, y_train, mode='ovr', **params):
-    """Function that fits a LogisticRegression|Ridge model (with given `params`) to the
-    train data for both binary, multi-label classification tasks and single output regression.
-    (mode='auto'|'ovr'|'regression' - for binary|multilabel classification| regression)"""
+    """
+    Function that fits a (LogisticRegression | Ridge) model (with given `params`) to the
+    train data. It works for binary, multi-label classification tasks and single output regression.
+
+    :param  X_train, y_train (dataset :np.array)
+            mode 'auto'|'ovr'|'regression'
+            params extra settings for LR|Ridge
+    :return list containing a single element, the trained model
+    """
 
     # Fit
     mdl_params = params.copy()
@@ -318,27 +379,34 @@ def fit_lr_models(X_train, y_train, mode='ovr', **params):
         # multi-output (ridge) | multilabel clasif (lr)
         w = np.hstack([model.intercept_.reshape(-1, 1), model.coef_]).T      
 
-    model.w_ = w
-    
-    return [model]  # Por uniformizar tipo devuelto con fit_bcd_models... será lista con 1 elemento
+    # Por uniformizar con funcionamiento de ROLANN y `fit_rolann_models`:
+    model.w_ = w    # guardamos pesos finales en `w_`
+    return [model]  # deolvemos lista con 1 elemento
 
 def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
-    """Function that fits LR VFL models to the train data in both OvR and binary
-    classification tasks. {`params`} contains both LR hyperparameters as well as
-    VFL-related train parameters."""
+    """
+    Function that fits a LR_VFL model to the train data (with given `params`).
+    Supports single-output regression, binary and multi-label classification tasks.
+    :params     X_train, y_train (dataset :np.array)
+                mode 'ovr'|'binary'|'regression' (:string)
+                params LR|Ridge hyperparameters and VFL scenario settings (:dict)
+    :return     tuple containing lists of LR_VFL coordinators and clients
+    """
 
-    # Params LR
+    # Params LR|Ridge
     lam         = params['lam']
-    tol         = params['tol']
-    max_iter    = params['max_iter']
-
     # Params VFL
     p           = params['p']
+    # Params LR_VFL
+    tol         = params['tol']
+    max_iter    = params['max_iter']
     lr          = params['lr']
     method      = params['method']
     taylor      = params['taylor']
     w_lr        = params['w_lr']
     Xtest, ytest= params['test_data']
+    init        = params.get('init', 'zero')
+    reg_bias    = params.get('reg_bias', False)
 
 
     # Dividimos 'X' para los distintos clientes
@@ -378,22 +446,24 @@ def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     # Fit
     for i, coord in enumerate(lst_coords):
         print(f"Entrenando {'Ridge' if mode=='regression' else 'LR'} VFL para clase-salida {i+1}/{num_outputs}...")
-        coord.fit(max_iter=max_iter, tol=tol, lr=lr, method=method, taylor=taylor)
+        coord.fit(max_iter=max_iter, tol=tol, lr=lr, method=method, taylor=taylor, init=init, reg_bias=reg_bias)
     
     return lst_coords, lst_clients
 
 def run_grid_search_lr(X_train, y_train, X_test, y_test, param_grid, mode='ovr'):
     """
-    Run experiments over a grid-search combination of hyperparameters in a LR/Ridge VFL scenario.
+    Run LR/Ridge experiments over a combination of hyperparameters (grid) in different VFL scenarios.
     
     param_grid = {
-        # LR/Ridge PARAMS
+        # PARAMS LR/Ridge PARAMS
         'lam': [1e-3],                          # l2 regularization
-        'tol': [1e-5, 0]                        # solver tolerance
-        'max_iter': [200]                       # solver max iters
-
-        # VFL params
+    
+        # PARAMS VFL 
         'p': [[2, 2], [4, 4]],                  # node config
+        
+        # PARAMS LR_VFL
+        'tol': [1e-5, 0]                        # solver tolerance
+        'max_iter': [200]                       # solver max iter
         'lr': [0.5, 0.75, 1.0],                 # learning rates
         'method': ['gd', 'bfgs'],               # modes
         'taylor': [True, False]                 # taylor aprox of loss fn
@@ -420,7 +490,7 @@ def run_grid_search_lr(X_train, y_train, X_test, y_test, param_grid, mode='ovr')
             t_lr        = perf_counter()
             mdl_lr      = fit_lr_models(X_train, y_train, mode=mode, lam=lam, tol=tol, max_iter=max_iter)
             print(f"{'LR' if mode != 'regression' else 'Ridge'} \
-            centralizado entrenado en: {perf_counter() - t_lr:.2f} (s)")
+            centralizado entrenado en: {perf_counter()-t_lr:.2f} (s)")
 
         # [VFL|Ridge LR]
         params['w_lr']      = mdl_lr[0].w_
@@ -435,9 +505,8 @@ def run_grid_search_lr(X_train, y_train, X_test, y_test, param_grid, mode='ovr')
     return results
 
 def product_grid(bcd_grid):
-    """Función auxiliar para obtener el producto cartesiano de los hiperparametros
-       de una búsqueda en cuadricula (grid-search) para BCD ROLANN que solo produce
-       combinaciones con modo 'sequential' que tengan 'lr' a 1."""
+    # Obtiene el producto cartesiano de la combinatoria de hiperparametros en el dict
+    # bcd_grid forzando que mode='sequential' -> lr=1 e ignorando las otras opciones
     
     # Combinaciones posibles de hiperparams - prod. cartesiano
     par_combinations, seq_combinations = [], []
@@ -449,7 +518,7 @@ def product_grid(bcd_grid):
         keys, values = zip(*par_grid.items())
         par_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
-    # En el modo secuencial machacamos el 'lr' fijado a 1.0
+    # En el modo secuencial machacamos el 'lr' a 1 siempre
     if 'sequential' in bcd_grid['mode_bcd']:
         seq_grid = copy.deepcopy(bcd_grid)
         seq_grid['mode_bcd'] = ['sequential']
@@ -458,6 +527,22 @@ def product_grid(bcd_grid):
         seq_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
     return par_combinations + seq_combinations
+
+def get_bcd_class(impl='normal', ctx=None):
+    # Función auxiliar para instanciar una impl. determinada de cliente y coordinador BCD_ROLANN 
+    impl_dict = {
+        'normal':   (BCDClient, BCDCoordinator),
+        'par':      (BCDClient_par, BCDCoordinator_par),
+        'fhe':      (BCDClient_fhe, BCDCoordinator_fhe),
+        'sec':      (BCDClient_sec, BCDCoordinator_sec)
+    }
+    # Validaciones
+    if impl not in impl_dict:
+        raise ValueError(f"Implementación desconocida ({impl}): {list(impl.keys())}")
+    elif impl == 'fhe' and ctx is None:
+        raise ValueError(f"Implementación FHE necesita un contexto tenSeal (`ctx`).")
+    else:
+        return impl_dict[impl]  # Cliente, Coordinador (:class, :class)
 
 
 #===================

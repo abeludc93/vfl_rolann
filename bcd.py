@@ -467,6 +467,10 @@ class BCDCoordinator_fhe(BCDCoordinator_par):   # solo sobreescrible los "bloque
         # En el bucle de BCD_ROLANN `Z` es un CKKSVector pero para el historial y
         # debug obtenemos este dato en claro llamando directamente a la superclase
         return sum([super(BCDClient_fhe, c).get_net_input() for c in self.clients])
+    
+    def set_ctx(self, ctx):
+        # Setter de contexto tenSeal
+        self.ctx = ctx
 
 #===============================================================
 #===[Versiones de cliente/coordinador bajo SecureAggregation]===
