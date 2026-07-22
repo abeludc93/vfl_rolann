@@ -2,11 +2,10 @@
 """
 rolann.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Implementación básica del entrenamiento, computo de pesos óptimos 
+Implementación básica del entrenamiento, cómputo de pesos óptimos 
 (solución) y predicción del algoritmo ROLANN original.
-No implementamos aprendizaje incremental (no se guardan M, U o S).
-Esta pensado únicamente como benchmark para los resultados del BCD.
-Realiza regresión o clasificación automáticamente en función de 'f_act'.
+No implementamos el aprendizaje incremental (no se guardan M, U o S).
+Realiza regresión o clasificación en función de la 'f_act' dada.
 """
 # Third-party libraries
 import numpy as np
@@ -15,9 +14,8 @@ from activation_functions import load_act_fn, map_labels
 
 
 def compute_loss_J_w(w, X, y, lam, f_act):
-    """
-    Calculo de la función objetivo J(w) de ROLANN
-    """
+    # Cálculo de la función objetivo J(w) de ROLANN
+    
     _, f_inv, f_der = load_act_fn(f_act)    # Cargamos f. act.
     f_map = map_labels(f_act)               # Cargamos mapper y -> d
     Xp = np.vstack([np.ones(len(X)), X.T])  # Xp traspuesto con bias incluido
@@ -48,38 +46,6 @@ class ROLANN:
         self.f_act              = f_act                 # Función de activación
         self.lam                = lam                   # Regularización
 
-    def _fit(self, X, y):
-        # Cargamos f. act.
-        _, f_inv, f_der = load_act_fn(self.f_act)
-        
-        # Preparamos 'X' -> Xp traspuesto con bias
-        Xp = np.vstack([np.ones(len(X)), X.T])
-
-        # Preparamos 'y' -> d, dbar, f_dbar
-        if self.f_act == 'linear':
-            # suponemos regresión
-            d = y
-        else:
-            # suponemos clasificación
-            f_map = map_labels(self.f_act)
-            d = f_map(y)
-        d_bar = f_inv(d)
-        f_dbar = f_der(d_bar).flatten()
-        
-        # SVD y términos sistema
-        F = np.diag(f_dbar)
-        H = Xp @ F                                      
-        U, s, _ = np.linalg.svd(H, full_matrices=False)     # SVD sobre matriz de factorizacion
-        S = np.diag(s)
-        
-        # Solución
-        M = Xp @ (F @ (F.T @ d_bar))                        # Calculo de M como XFFd_bar
-        SS_lamI = S @ S + self.lam * np.eye(len(S))         # Construimos (S^2 + \lambda I)
-        w = U @ (np.diag(1/SS_lamI.diagonal()) @ (U.T @ M)) # Pesos optimos
-
-        self.w_ = w.reshape([-1, 1])                        # Aseguramos vector columna pesos
-        return self.w_
-    
     def fit(self, X, y):
         # Cargamos f. act.
         _, f_inv, f_der = load_act_fn(self.f_act)
@@ -88,17 +54,12 @@ class ROLANN:
         Xp = np.vstack([np.ones(len(X)), X.T])
 
         # Preparamos 'y' -> d, dbar, f_dbar
-        if self.f_act == 'linear':
-            # suponemos regresión
-            d = y
-        else:
-            # suponemos clasificación
-            f_map = map_labels(self.f_act)
-            d = f_map(y)
+        f_map, _ = map_labels(self.f_act)
+        d = f_map(y)
         d_bar = f_inv(d).flatten()
         f_dbar = f_der(d_bar).flatten()
         
-        # SVD y términos sistema
+        # SVD y matriz de factorización
         H = Xp * f_dbar
         U, s, _ = np.linalg.svd(H, full_matrices=False)     # SVD sobre matriz de factorizacion
         S = np.diag(s)

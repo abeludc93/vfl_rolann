@@ -2,9 +2,8 @@
 """
 lr.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Implementación básica de un modelo tipo LogisticRegression con regularización
-L2 para el escenario federado VFL. Equivalente a un LogisticRegression de sklearn.
-También implementa un equivalente VFL a un modelo Ridge para tareas de regresión.
+Implementación básica de un modelo tipo LogisticRegression|Ridge con reg.
+L2 para el escenario federado VFL en tareas de clasificación o regresión.
 """
 # Third-party libraries
 import numpy as np
@@ -45,6 +44,8 @@ def log_likelihood_taylor(ytrue, z):
 #===[Funciones de pérdida/objetivo]===
 #=====================================
 def compute_loss_log(w, X, y, lam, **kwargs):
+    # Adapts `val_loss_log` to the same signature as `ROLANN.compute_loss_J_w` for easier comparisons.
+
     # Proxy para calcular valor de la f.objetivo a semejanza de compute_loss_J_w de ROLANN.py (mismos args.)
     Xp = np.vstack([np.ones(len(X)), X.T])
     w = w.reshape(-1, 1)
@@ -54,6 +55,7 @@ def compute_loss_log(w, X, y, lam, **kwargs):
     return val_loss
 
 def val_loss_log(y, z, w, lam, taylor=False, reg_bias=False):
+    # Computes the value of the objective function used in LogisticRegression models.
     y_f, z_f = y.flatten(), z.flatten()
     loss    = log_likelihood_taylor(y_f, z_f) if taylor else log_likelihood(y_f, z_f)
     loss_l2 = np.sum(w**2) if reg_bias else np.sum(w[1:]**2)
@@ -61,6 +63,8 @@ def val_loss_log(y, z, w, lam, taylor=False, reg_bias=False):
     return loss + 0.5 * lam * loss_l2
 
 def compute_loss_linear(w, X, y, lam, **kwargs):
+    # Adapts `val_loss_linear` to the same signature as `ROLANN.compute_loss_J_w` for easier comparisons.
+
     # Proxy para calcular valor de la f.objetivo a semejanza de compute_loss_J_w de ROLANN.py (mismos args.)
     Xp = np.vstack([np.ones(len(X)), X.T])
     w = w.reshape(-1, 1)
@@ -70,6 +74,7 @@ def compute_loss_linear(w, X, y, lam, **kwargs):
     return val_loss
 
 def val_loss_linear(y, z, w, lam, reg_bias=False, **kwargs):
+    # Computes the value of the objective function used in Ridge models.
     y_f, z_f = y.flatten(), z.flatten()
     loss     = np.mean((y_f - z_f)**2)
     loss_l2  = np.sum(w**2) if reg_bias else np.sum(w[1:]**2)
@@ -86,10 +91,13 @@ class LRClient:
         self.id     = id        
         self.X      = X         # Matriz de datos local m x n (variables, muestras)
         self.lam    = lam       # Regularización L2
-        self.f_act  = 'logs'    # LR para tarea de clasificación
+        self.f_act  = 'logs'    # Función de activación (solo 'logs')
         self.debug  = debug     # Debug (historial)
 
     def precompute(self):
+        # There is no need for a strict `precompute` in VFL_LR, but we adapt this
+        # implementation to mirror BCD_ROLANN and use it to setup different variables
+
         if hasattr(self, 'precomputed_') and self.precomputed_: return
         # Bias sobre matriz de datos
         if self.id == 1:
@@ -121,10 +129,10 @@ class LRClient:
             reg_term[0] = 0.0   # no regularizo bias
         grad += reg_term 
         
-        # Descenso de gradiente
+        # Descenso de gradiente (GD: Gradient Descent)
         if method == 'gd':
             self.w_ = self.w_ - lr * grad
-        # Quasi-Newton - bfgs
+        # Quasi-Newton (BFGS: Broyden–Fletcher–Goldfarb–Shanno)
         else:
             if hasattr(self, 'H_'):
                 # Diferencia de gradientes e incrementos
@@ -169,6 +177,7 @@ class LRClient:
         return y_pred
     
     def reset(self, hard=False):
+        # Reset weights and auxiliary variables for a new `fit()` process
         if hasattr(self, 'w'):
             self.w_ = np.zeros_like(self.w_)
         if hasattr(self, 'H_'):
@@ -178,6 +187,7 @@ class LRClient:
             if self.debug:  self.history = {'norm_grd': [], 'norm_res': [], 'norm_inp': []}
 
     def get_results(self, name=None):
+        # Returns client history as a DataFrame
         if not self.debug:  return None
         df = pd.DataFrame.from_dict(self.history, orient='index').transpose()
         df['iter'] = df.index + 1
@@ -188,19 +198,23 @@ class LRClient:
 class LRCoordinator:
     def __init__(self, clients, y, test_data=None, w_lr=None):
         # Constructor
-        self.clients    = clients
-        self.y          = y.reshape([-1, 1])
-        self.test_data  = test_data
-        self.w_lr       = w_lr
-        self.f_act      = 'logs'
+        self.clients    = clients               # list of clients
+        self.y          = y.reshape([-1, 1])    # real/desired outputs (no multi-output, 1D data)
+        self.test_data  = test_data             # test dataset
+        self.w_lr       = w_lr                  # solution from centralized LogisticRegression
+        self.f_act      = 'logs'                # act. function ('logs' only)
 
     def fit(self, max_iter=20, tol=1e-3, lr=0.75, method='gd', taylor=False, init='zero', reg_bias=False):
-        
+        # This method resembles the BCD_ROLANN coordinator `fit` base logic for the VFL_LR models.
+
+        # [INIT HISTORY]
         print(f"Iniciando VFL {type(self)} (modo={method}, taylor={taylor}, reg_bias={reg_bias}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
         self.hparams = {'max_iter': max_iter, 'tol': tol, 'lr': lr, 'mode': method, 'taylor': taylor, 'p': len(self.clients), 'init': init}
         self.history = {'diff_w': [], 'diff_Z': [], 'diff_w_lr': [], 'loss':[], 'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
+        # [RESET]
         self.reset(hard=False)  # Reiniciamos pesos de clientes de 'fits' anteriores
         
+        # [PREPARE TEST DATA]
         # Dejo preparado bias en X_test
         if self.test_data:
             X_test, y_test  = self.test_data
@@ -216,14 +230,16 @@ class LRCoordinator:
             map_pred    = lambda y: y
             metric_fn   = root_mean_squared_error
 
-        # Precomputo - inexistente, solo asignamos matrices de datos locales e inicializamos pesos w_i
-        for client in self.clients:
-            client.precompute()
+        # [PRECOMPUTE]: inexistente, solo asignamos matrices de datos locales X_i e inicializamos pesos w_i
+        for client in self.clients: client.precompute()
+        
+        # [INIT PARAMS]
         m = sum([len(c.w_) for c in self.clients])
         w = np.zeros([m, 1])
         Z = np.zeros_like(self.y, dtype=float) if init == 'zero' else np.random.rand(self.y.shape)
         lam = self.clients[0].lam   # Para la pérdida correspondiente a la reg. L2 - asumimos igual en todos los clientes
 
+        # [LOOP]
         for iter in range(max_iter):
             t_iter_ini = perf_counter()
             
@@ -231,6 +247,7 @@ class LRCoordinator:
             w_iter = w
             Z_iter = Z
             
+            # [ITERATION]
             # 1. Predicción y error despues de la f. act.
             y_pred = f_act(Z_iter)
             
@@ -238,7 +255,7 @@ class LRCoordinator:
             e = y_pred - self.y 
             
             # 3. Enviar el error a los clientes para que actualicen sus pesos
-            for c in self.clients:
+            for c in self.clients: # TODO: paralelize via `joblib`
                 c.update_weights(e, lr, method, reg_bias)
 
             # 4. Input neto nuevo
@@ -246,6 +263,7 @@ class LRCoordinator:
 
             t_iter_end = perf_counter()
 
+            # [UPDATE HISTORY]
             # Información de iteración para estudio - monitorización convergencia y criterio de parada
             w       = np.concatenate([c.w_ for c in self.clients])  # pesos alcanzados en esta iter
             diff_w  = np.linalg.vector_norm(w - w_iter)             # respecto a iter anterior
@@ -278,9 +296,11 @@ class LRCoordinator:
             self.history['score_train'].append(score_train)
             self.history['score_test'].append(score_test)
             
-            # Criterio de parada 
+            # [LOG PROGESS]
             if ((iter+1) % round(max_iter / 4)) == 0 or (iter + 1) == max_iter or diff_Z < tol:
                 print(f"Iter {iter+1} | Loss: {loss:.4f} | diff_Z: {diff_Z:.4f}")
+            
+            # [CHECK STOP]: criterio de parada
             if diff_Z < tol:
                 print("Convergencia alcanzada.")
                 break
@@ -289,6 +309,7 @@ class LRCoordinator:
         self.w_ = w
                 
     def get_results(self, name=None):
+        # Return coordinator history as a DataFrame
         df = pd.DataFrame.from_dict(self.history, orient='index').transpose()
         df['iter'] = df.index + 1
         if name:     df['name'] = name
@@ -297,6 +318,7 @@ class LRCoordinator:
         return df
     
     def get_client_results(self, name=None):
+        # Returns all client history as a single DataFrame
         if len(self.clients) > 0 and all([c.debug for c in self.clients]):
             return pd.concat([c.get_results(f"{name if name else ''}{c.id}") 
                               for c in self.clients])
@@ -304,9 +326,11 @@ class LRCoordinator:
             return None
 
     def reset(self, hard=False):
+        # Resets clients
         [client.reset(hard) for client in self.clients];
 
     def predict(self, X, taylor=False):
+        # Basic predict
         Xp = np.vstack([np.ones([1, X.shape[1]]), X])  # Introducimos bias
         z = self.w_.T @ Xp
         f_act = linear if self.f_act == 'linear' else (logsig_taylor if taylor else logsig)

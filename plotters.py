@@ -2,7 +2,7 @@
 """
 plotters.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Funciones para la visualización de los resultados
+Funciones para la visualización de los resultados de un coordinador BCD_ROLANN.
 """
 # Third-party libraries
 import numpy as np
@@ -12,7 +12,7 @@ import seaborn as sns
 # Application-modules
 from helpers import disarrange_weights_by_split
 
-
+# BASIC PARAMS EXAMPLE FOR `plot_sns()` `kwargs`
 SNS_PARAMS = {
     'x': 'iter',        # Eje X
     'y': 'diff_Z',      # Eje Y
@@ -25,16 +25,14 @@ SNS_PARAMS = {
 
 def plot_sns(df, plot_log=True, tol=None, title="", **kwargs):
     """
-    kwargs ejemplo:  
-        {
-        'x': 'iter',        # Eje X
-        'y': 'diff_Z',       # Eje Y
-        'hue': 'lr',        # Distinto color para cada Learning Rate
-        'style': 'mode',    # Distinto trazo (sólido, punteado) para SEQ vs PAR
-        'size': 'p',
-        'linewidth': 1.5,
-        ...
-        }
+    From a wide tabular dataframe `df` with BCD_ROLANN coordinator results, graphs
+    a seaborn lineplot with given settings.
+    :param      df (:pd.DataFrame)
+                plot_log, logarithmic y-ax  (:bool)
+                tol, horizontal dashed line to show off tolerance stop criteria (:float)
+                title (string)
+                kwargs for extra settings, see SNS_PARAMS (:dict)
+    Multiple subplots can be achived by specifying {'ax': ax} in kwargs.
     """
     # Figura
     ax = kwargs.get('ax', None)
@@ -67,6 +65,12 @@ def plot_sns(df, plot_log=True, tol=None, title="", **kwargs):
         plt.show()
 
 def plot_weights_comparison(w1, w2, label_w1='ROLANN', label_w2='BCD', title="COMPARACION PESOS"):
+    """
+    Graphs a stem plot showing the differences between `w1` and `w2` weight vectors for comparison purposes.
+    :param      w1, w2 column vectors (:np.array)
+                label_w1, label_w2, title (:string)
+    """
+
     # Aplanamos por si vienen como vectores columna (m, 1)
     w_c = w1.flatten()
     w_b = w2.flatten()
@@ -111,7 +115,9 @@ def plot_weights_comparison(w1, w2, label_w1='ROLANN', label_w2='BCD', title="CO
 #====================
 
 def plot_correlation_map(X, title="Matriz de correlación entre variables"):
-    # X es la matriz de datos en formato DataFrame y dimensiones (n, m)
+    # Plots a heatmap with of the correlation matrix for a given dataset
+    # training data (X) of dimensions (n, m).
+
     # Calculamos matriz de correlación
     corr_matrix = X.corr()
     # Heatmap
@@ -123,6 +129,7 @@ def plot_correlation_map(X, title="Matriz de correlación entre variables"):
     plt.show()
 
 def plot_score_global(df, labels, ylabel="Accuracy"):
+    # Graphs two subplots showing both OvR and global train/test scores.
 
     x = df['iter']
     _, axes = plt.subplots(1, 2, sharex=True, figsize=(10,5))
@@ -148,7 +155,10 @@ def plot_score_global(df, labels, ylabel="Accuracy"):
     plt.show()
 
 def plot_im_split(img, lst_idx, title=None):
-    
+    # Given a 2D data sample and a list of index masks, plots a colored representation
+    # showing how the VFL split partitions the image data.
+    # Useful in datasets such as MNIST, etc. to represent a given VFL scenario.
+
     # Máscara
     n = len(lst_idx)                # nº de nodos
     mask = np.full_like(img, -1)    # mascara para colorear img según los nodos
@@ -172,6 +182,9 @@ def plot_im_split(img, lst_idx, title=None):
     fig.tight_layout()
 
 def plot_im_weights(w_optim, w_vfl, p_dict, imgsize=(28, 28), title="OPTIM vs VFL"):
+    # Plots a 2D representation of the weights provided in `w_optim` and `w_vfl`,
+    # after reshaping the column vectors according to `imgsize`dimensions.
+    # Useful in datasets such as MNIST to illustrate the 2D form of a BCD_ROLANN solution.
 
     w_vfl_sorted = disarrange_weights_by_split(w_vfl, p_dict)
 
