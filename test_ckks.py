@@ -1,10 +1,8 @@
 #%% FHE Esquema CKKS - TenSeal
 """
+Librería: `pip install tenseal` -> implementa FHE con esquema CKSS (sumas, restas, multiplicaciones)
+
 Pruebas simulando implementación en bucle iterativo BCD ROLANN.
-
-Librería: `pip install tenseal` -> implementa FHE con esquema CKSS (permite sumas, restas, multiplicaciones)
-
-IMP: Soporta operaciones vectorizadas (`ckks_vector`)
 
 Pasos:
 
@@ -20,7 +18,7 @@ Pasos:
         3.1 Calcula E = f_dbar - Z
         3.2 Hace e_i = E + z_i para cada los clientes.
 
-El cliente trabaja con datos en claro pero necesita encriptar/desencriptar.
+El cliente trabaja con datos en claro pero necesita encriptar/desencriptar al enviar/recibir datos.
 El coordinador puede trabajar enteramente con datos cifrados (incluido el f_dbar).
 Esto implica un clave privada compartida por todos los clientes y una publica conocida solo por el coordinador.
 
@@ -28,31 +26,32 @@ Esto implica un clave privada compartida por todos los clientes y una publica co
 
 Simularemos 3 procesos:
 
-+ Cliente:  1) Encriptar) 2) Desencriptar
-+ Coordinador: 3) Agregacion y calculo residuos
++ Cliente:      1) Encriptar
+                2) Desencriptar
++ Coordinador:  3) Agregacion y calculo residuos
 
-Para tamaños de vector 'n' crecientes (muestras del dataset):
+Para tamaños de vector 'N' crecientes (muestras del dataset):
 
-    Esperamos que el overhead en los clientes sea cada vez mayor pero que sufra menos que el coordinador
-    ya que es más complejo la desencriptación/encriptación que la suma/resta una vez cifrados.
+    El overhead en los clientes se mantiene estable y la suma
+    en el coordinador también, aunque esta operación dure más.
 
 Para un numero creciente de nodos 'p':
 
-    Esperamos un leve incremento del tiempo de calculo del coordinador. Los clientes no se verán afectados
-    ya que "trabajan" en paralelo.
-
-[OTRAS CONSIDERACIONES]
-Obviamos el estudio del overhead o costes de comunicación en comparación con 'float' (8bytes) o 'nd.array' de floats.
+    Esperamos un incremento del tiempo de calculo del coordinador.
+    Los clientes no se verán afectados ya que "trabajan" en paralelo.
 
 """
-#%% Ejemplo de libreria FHE
-#==============================
-#==============================
+#%% [IMPORTS]
+import time
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import tenseal as ts
+import pickle
+
+#%% [FHE example: check-up of tenseal library]
 
 # Generacion claves
-import tenseal as ts
-import numpy as np
-
 context = ts.context(
             ts.SCHEME_TYPE.CKKS,
             poly_modulus_degree=8192,
@@ -68,21 +67,13 @@ dec_lst_numeros = enc_lst_numeros.decrypt()
 
 assert np.allclose(dec_lst_numeros, lst_numeros)
 
-#%% [TESTS CIFRADO BCD ROLANN]
-#==============================
-#==============================
+#%% [Benchmarks]
 
-import time
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import tenseal as ts
-
-
+# Simulates BCD_ROLANN fit process w/ FHE
 def benchmark_fhe(N, p, repeticiones=3):
     """ Simula los procesos de cifrado llevados a cabo por cliente y coordinador usando
         un esquema de FHE CKKS para UNA iteración del bucle BCD ROLANN paralelo."""
-    global context
+    global context, sk
 
     print(f"Benchmark FHE CKKS: dimension vector ({N}), clientes ({p})")
 
@@ -105,7 +96,7 @@ def benchmark_fhe(N, p, repeticiones=3):
         fin_enc = time.perf_counter() - ini_enc
         t_enc += fin_enc
 
-        assert np.allclose(z_0_enc.decrypt(), inputs_z_i[0])
+        assert np.allclose(z_0_enc.decrypt(sk), inputs_z_i[0])
 
         # [Coordinador]
 
@@ -125,13 +116,13 @@ def benchmark_fhe(N, p, repeticiones=3):
         fin_coord = time.perf_counter() - ini_coord
         t_coord += fin_coord
         
-        assert np.allclose(Z.decrypt(), sum(inputs_z_i))
+        assert np.allclose(Z.decrypt(sk), sum(inputs_z_i))
 
         # [Cliente]    
         # 3) Desencriptar e_i_enc
         ini_dec = time.perf_counter()
 
-        e_i = e_i_enc.decrypt()
+        e_i = e_i_enc.decrypt(sk)
         fin_dec = time.perf_counter() - ini_dec
         t_dec += fin_dec
 
@@ -147,7 +138,25 @@ def benchmark_fhe(N, p, repeticiones=3):
 
     return df
 
+# Simulates BCD_ROLANN comm costs w/ FHE
+def benchmark_commcosts(N_lst):
+    global context
+    df_dict = {'N':[], 'plain': [], 'encrypted': [], 'overhead': []}
+    for N in N_lst:
+        vec         = np.random.rand(N)             # np,array
+        vec_enc     = ts.ckks_vector(context, vec)  # encrypted array
+        plain_size  = len(pickle.dumps(vec))        # normal serialization
+        enc_size    = len(vec_enc.serialize())      # encripted serialization
+        overhead    = enc_size / plain_size
 
+        df_dict['plain'].append(plain_size/1024)
+        df_dict['encrypted'].append(enc_size/1024)
+        df_dict['overhead'].append(overhead)
+        df_dict['N'].append(N)
+
+    return pd.DataFrame.from_dict(df_dict)
+
+# Plotters
 def plot_tiempos_vector(df):
     plt.figure(figsize=(10, 6))
     plt.plot(df.N, df.encriptar, 'o-', label=r'Cliente: encriptar $z_i$')
@@ -158,8 +167,8 @@ def plot_tiempos_vector(df):
     plt.title(f"Benchmark FHE CKSS (tenSeal) - coste computacional - {df.p.values[0]} clientes")
     plt.legend()
     plt.grid()
+    plt.yscale('log')
     plt.show()
-
 
 def plot_tiempos_clientes(df):
     plt.figure(figsize=(10, 6))
@@ -171,18 +180,47 @@ def plot_tiempos_clientes(df):
     plt.grid()
     plt.show()
 
+def plot_commcosts(df):
+    plt.figure(figsize=(10, 6))
+    plt.loglog(df.N, df.plain, 'o-', label=r'Tamaño vector en claro $z_i$')
+    plt.loglog(df.N, df.encrypted, '^-', label=r'Tamaño vector encriptado $z_i$')
+    plt.loglog(df.N, df.overhead, 's-', label=r'Overhead debido a FHE')
+    plt.xlabel('Dimensión del vector (N)')
+    plt.ylabel('Tamaño serializado (KB)')
+    plt.title(f"Benchmark FHE - coste comunicaciones según tamaño vector" \
+                 f"\nTenSeal poly modulus degree: {poly}")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
-#%% [BENCHMARK]
+#%% [Setting up TenSEAL context]
 print("Generando par de claves FHE TenSEAL...")
+poly = 8192
 context = ts.context(
             ts.SCHEME_TYPE.CKKS,
-            poly_modulus_degree=8192,
+            poly_modulus_degree=poly,
             coeff_mod_bit_sizes=[60, 40, 40, 60]
           )
 context.generate_galois_keys()
 context.global_scale = 2**40
 
-# 1. Pruebas con tamaño vectores
+# %% [Checking visibility of private-public keys]
+print("Is the context private?", ("Yes" if context.is_private() else "No"))
+print("Is the context public?", ("Yes" if context.is_public() else "No"))
+sk = context.secret_key()
+ctx = context.serialize(save_public_key=True, save_secret_key=True)
+print(f"Context size: {len(ctx)/1024:.2f} KB")
+
+# Context will drop the secret-key at this point
+context.make_context_public()
+print("Secret-key dropped")
+print("Is the context private?", ("Yes" if context.is_private() else "No"))
+print("Is the context public?", ("Yes" if context.is_public() else "No"))
+
+ctx = context.serialize(save_public_key=True, save_secret_key=False)
+print(f"Context size: {len(ctx)/1024:.2f} KB")
+
+#%% [Exp1. Increasing vector size]
 N_lst = [100, 500, 1000, 2000]
 p = 3
 df_lst = []
@@ -190,57 +228,43 @@ for N in N_lst:
     df = benchmark_fhe(N, p, repeticiones=2)
     df_lst.append(df)
 df_vectores = pd.concat(df_lst, ignore_index=True)
-
-#%% [VISUALIZAMOS RESULTADOS]
 plot_tiempos_vector(df_vectores)
 
-#%%
-# 2. Pruebas con numero de clientes
+#%% [Exp 2. Increasing number of clients]
 p_lst = [3, 10, 50, 100]
 df_lst = []
+N = 25
 for p in p_lst:
-    df = benchmark_fhe(25, p, repeticiones=1)
+    df = benchmark_fhe(N, p, repeticiones=1)
     df_lst.append(df)
 df_clientes = pd.concat(df_lst, ignore_index=True)
-
-#%% [VISUALIZAMOS RESULTADOS]
 plot_tiempos_clientes(df_clientes)
 
-# %% [TAMAÑO y CTX PUBLICO-PRIVADO]
-print("Is the context private?", ("Yes" if context.is_private() else "No"))
-print("Is the context public?", ("Yes" if context.is_public() else "No"))
 
-sk = context.secret_key()
+#%% [Exp 3. Overhead in comm.costs due to increasing vector size]
+N_lst=[10, 100, 1000, 10000, 100000]
+df_commcost = benchmark_commcosts(N_lst)
+plot_commcosts(df_commcost)
 
-# the context will drop the secret-key at this point
-context.make_context_public()
-print("Secret-key dropped")
-print("Is the context private?", ("Yes" if context.is_private() else "No"))
-print("Is the context public?", ("Yes" if context.is_public() else "No"))
-
-ctx= context.serialize(save_public_key=True, save_secret_key=False,
-                       save_galois_keys= True, save_relin_keys= True)
-#%% Aumento de tamaño
-dim = 100
-# Vector original
-vec = [0.1*i for i in range(dim)]
-vec2 = [2*i for i in range(dim)]
-
-# Serializado en claro
-import pickle
-plain_bytes = pickle.dumps(vec)
-
-# Encriptado
-vec_enc = ts.ckks_vector(context, vec)
-vec2_enc = ts.ckks_vector(context, vec2)
-enc_bytes = vec_enc.serialize()
-
-# Medir overhead
-plain_size = len(plain_bytes)
-enc_size   = len(enc_bytes)
-overhead  = enc_size / plain_size
-
-print(f"Plain vector (N={dim}): {plain_size/1024:.2f} KB")
-print(f"Encrypted vector (N={dim}): {enc_size/1024:.2f} KB")
-print(f"\tOverhead factor: {overhead:.2f} x")
-# %%
+# %% CONCLUSIONES
+"""
+1.  Coste computacional es mayor en la suma de los inputs netos de los clientes en el coordinador
+    que en la encriptació/desencriptación que se hace de ellos y los residuos en los clientes.
+2.  Coste computacional del protocolo FHE no depende tanto del tamaño de los vectores N si no del
+    nº clientes p. El tiempo por iteración en el coordinador (agregación y cómputo de residuos)
+    crece linealmente con el p.
+3.  El peso añadido en la serialización de los vectores encriptados por el uso de FHE (overhead)
+    decrece con la dimensión del vector N. Por ejemplo: no suponen más KB encriptar un np.array
+    de 10 elementos que de 1000. Este overhead parece asentarse en 10x.
+"""
+#%% OTHER CONSIDERATIONS
+"""
+1.  A partially homomorphic encryption protocol was considered using a Paillier scheme that enables
+    sums and multiplications of encrypted scalars thinking it would be computationally less expensive
+    than a full-on FHE scheme such as CKKS.
+2.  Nonetheless, the Paillier implementations found in libraries such as `phe` currently do NOT support
+    vectorized operations, relying instead on element-by-element procedures that waste any meaninful
+    prior advantages over FHE.
+3.  In older tags of this project, an equivalent benchmark was conducted for a simulated PHE scenario
+    that supports these considerations (search for `test_phe.py`)
+"""
