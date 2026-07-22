@@ -550,13 +550,20 @@ def get_bcd_class(impl='normal', ctx=None):
 #===================
 
 def score2label(scores, labels=None, f_act='logs'):
-    """Transforms prediction scores into prediction labels for both binary and multiclass classification.
+    """
+    Transforms prediction scores into prediction labels for both binary and multiclass classification.
+    `scores` are NOT probability estimations (!= `predict_proba` \in (0, 1)) but raw OUTPUTS of the model,
+    so they depend on the mapping used for the activation function (`logs`).
+    Example:    f_act='logs' typically implies mapping (0.05, 0.95) for NEG/POS classes
+                f_act='tanh' typically implies mapping (-.95,  .95) for NEG/POS classes
+
     If no labels are given for binary classification a 0=NEG 1=POS fallback will be used.
-    Otherwise, labels should have the same length as the no. of columns in `scores` array of dim. (n, c).
+    Otherwise, `labels` should have the same length as the no. of columns in the `scores` array of dimensions (n, c).
     """
 
     # Formateamos a numpy por si viene como lista o dataframe
     scores = np.asarray(scores)
+    # Obtenemos los mapping values para fijar umbral de decisión
     _, negpos_tuple = map_labels(f_act)
 
     # Multiclase
@@ -585,13 +592,18 @@ def score2label(scores, labels=None, f_act='logs'):
     return pred
 
 def predict_models(X, models):
-    """Build prediction scores for collection of models."""
+    # Build prediction scores for collection of models.
 
     # Matriz (n x c), siendo c el nº clases o salidas
     scores = np.hstack([mdl.predict(X) for mdl in models])
+
     return scores
 
 def communication_costs(k, p, n, size_bytes=8, c=1, out='bytes'):
+    # Computes communication costs of BCD_ROLANN|LR_VFL for a given
+    # set of 'k' iters, 'p' clients, 'n' vector size of residuals 
+    # or predictions exchanged and 'c' outputs.
+    # Returns sum in out='bytes'|'megabytes'|'gigabytes'
 
     iters = np.arange(1, k+1) if isinstance(k, int) else k
     comm_costs = iters * p * n * size_bytes * c
@@ -602,14 +614,23 @@ def communication_costs(k, p, n, size_bytes=8, c=1, out='bytes'):
     return pd.Series(comm_costs, name=out)
 
 def optimality_gap(loss, min_loss=None, percentage=False):
-    lb = min_loss if min_loss is not None else loss.min()   # TODO: coerce? and min_loss < loss.min()
+    # Computes suboptimality with respect to a `loss` fn values.
+    # If `min_loss` is not given it'll be set as the min `loss`.
+    # Returns raw format or percentage (`percentage`)
+
+    if min_loss is not None and min_loss < loss.min():
+        lb = min_loss
+    else:
+        lb =loss.min()
     opt_gap = loss - lb
     if percentage:  opt_gap = opt_gap / lb * 100
     return opt_gap
 
 def total_time(df, rolann=True):
-    # Valor tiempo preprocesado + suma acumulada de tiempos de iteración
+    # Computes total elapsed time from a BCD_ROLANN Coordinator fit process.
+    # Total time = sum client precompute time + sum iteration time
 
+    # Valor tiempo preprocesado + suma acumulada de tiempos de iteración
     groups = (df['iter'] == 1).cumsum()
     time   = pd.to_numeric(df.time, errors='coerce')
     total = time.groupby(groups).cumsum()
@@ -620,7 +641,12 @@ def total_time(df, rolann=True):
     return total
 
 def compute_extra_results(df, w_optim=None, rolann=True, **kwargs):
-    
+    # Enlarges the result dataframe from a BCD_ROLANN Coordinator with post-fit
+    # extra results such as: loss values, suboptimality, comm. costs and total time.
+    # It also works with LR_VFL dataframe results via `rolann` flag.
+    # `w_optim` represents the optimal (centralized) solution/weights.
+
+
     # 0. Solución centralizada y su valor para la f. objetivo
     f_act = kwargs.get('f_act', 'logs')
     f_obj = compute_loss_J_w if rolann else (compute_loss_log if f_act == 'logs' else compute_loss_linear)
@@ -637,6 +663,13 @@ def compute_extra_results(df, w_optim=None, rolann=True, **kwargs):
     return df
 
 def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=None):
+    # Given N separate result dataframes from a BCD_ROLANN Coordinator in a multi-output
+    # scenario, returns a single dataframe with both OvR and global scores.
+    #   :param  dfs (:pd.DataFrame)
+    #           test_data, train_data (:np.arrays)
+    #           f_act (:string)
+    #           skmetricfn, metric function from sklearn or equivalent (:Callable)
+    #           labels, for the `score2label` fn (:Iterable)
 
     Xtest, ytest    = test_data
     Xtrain, ytrain  = train_data
@@ -656,8 +689,8 @@ def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=N
         score_test  = np.vstack([f(w.T @ Xp_test) for w in wi])
         score_train = np.vstack([f(w.T @ Xp_train) for w in wi])
         if labels is not None:
-            ypred_test  = score2label(score_test.T, labels)
-            ypred_train = score2label(score_train.T, labels)
+            ypred_test  = score2label(score_test.T, labels, f_act)
+            ypred_train = score2label(score_train.T, labels, f_act)
         else:
             ypred_test  = score_test.T
             ypred_train = score_train.T
@@ -671,6 +704,9 @@ def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=N
     return df_scores
 
 def merge_df_gridsearch(exps, name=None):
+    # Utility function to merge the different results from `run_grid_search`
+    # or `run_grid_search_lr` execution in a single dataframe (w/ added field `name`).
+
     # Separamos modelos resultado del GridSearch en ROLANN y BCD ROLANN
     lst_rolann, lst_bcd = list(zip(*exps))
 
@@ -689,8 +725,10 @@ def merge_df_gridsearch(exps, name=None):
 #=======================
 
 def check_condition(X, lam=1e-3, f_act="linear"):
-    """Checks condition number of matrix A = H H^T + lam I"""
-
+    # Computes condition number of matrix A = H H^T + lam I. [A w = b ;  b = H F d_bar]
+    # This applies to a ROLANN / BCD_ROLANN linear system of equations.
+    # ROLANN/BCD_ROLANN is robust to bad conditioning.
+    
     _, f_inv, f_der = load_act_fn(f_act)
     _, negpos_tuple = map_labels(f_act)
     f_escalar = f_der(f_inv(negpos_tuple[0]))
@@ -702,18 +740,32 @@ def check_condition(X, lam=1e-3, f_act="linear"):
     return k_A
 
 def check_condition_lr(X, D=0.25, lam=1e-3):
+    # Computes condition number of the LogisticRegression|Ridge Hessian SDP matrix H_lr.
+    # [H_lr = X.T D X + lam I], D is a diagonal matrix with elements d_ii = p_i*(1-p_i),
+    # being p_i \in (0, 1) the probability of sample 'i'.
+    # If we start from max uncertainty -> p=0.5, wich explains the default value D=0.25
+    # LR|Ridge and its VFL implementations are susceptable to bad conditioning, demanding
+    # lower `learning_rate`'s. Theoretically, max_lr = 2 / k_Hlr
+
     n, m    = X.shape
     D_diag  = np.eye(n)
     lam_diag= np.eye(m)
     H_lr    = X.T @ (D * D_diag) @ X + (lam * lam_diag)
-    k_Hlr   =  np.linalg.cond(H_lr) # igual a cte de Lipschitz L = 1/4 * max_eigval(X X.T) + lamI
+    k_Hlr   =  np.linalg.cond(H_lr) # equals Lipschitz constant L = 1/4 * max_eigval(X X.T) + lamI
     return k_Hlr
 
 def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear", **kwargs):
-    """Computes spectral radius of the Gauss-Seidel iteration matrix M_GS (BCD ROLANN).
-    Values closer to 1 represent slow convergence. Values closer to 0 indicate fast convergen rápida."""
+    # Computes spectral radius of several iteration matrixes from BCD_ROLANN.
+    #   `mode=sequential` and `lr=1`    -> Gauss-Seidel iteration matrix M_GS
+    #   `mode=sequential` and `lr!=1`   -> SOR iteration matrix M_SOR (0<lr<2)
+    #   `mode=parallel`   and `lr=1`    -> Jacobi iteration matrix M_J
+    #   `mode=parallel`   and `lr<1`    -> Damped Jacobi iteration matrix M_JOR
+    # Values greater than 1 represent divergece.
+    # Values less than 1 reprensent convergence.
+    # Values closer to 1 but less than 1 represent slow convergence.
+    # Values closer to 0 indicate fast convergence.
 
-    # Split X according to the VFL split in p
+    # Split X according to the VFL split in `p`
     X_split = split_vfl_X(X.T, p)
     # Add bias term on first Xsplit element (equiv. to first BCD client)
     bias = np.ones(len(X)).reshape(-1,1)
@@ -754,17 +806,17 @@ def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear",
     lr = kwargs.get('lr', None)
     try:
         if mode_bcd == 'sequential':
-            if lr == 1: # GS puro
-                M_iter = np.linalg.solve(D + L, -U)
-            else:       # SOR
-                M_iter = np.linalg.solve(D + lr * L, (1.0 - lr) * D - lr * U)
+            if lr == 1:
+                M_iter = np.linalg.solve(D + L, -U)                             # M_GS
+            else:
+                M_iter = np.linalg.solve(D + lr * L, (1.0 - lr) * D - lr * U)   # M_SOR
         elif mode_bcd == 'parallel':
-            M_J = np.linalg.solve(D, -(L + U))
-            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
+            M_J = np.linalg.solve(D, -(L + U))                                  # M_J
+            M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J         # M_JOR
         else:
             raise ValueError(f"Modo BCD desconocido: {mode_bcd}")
     except np.linalg.LinAlgError:
-    # we defer to a pseudo-inverse in case of linalg error (singular matrix)
+        # we defer to a pseudo-inverse in case of linalg error (singular matrix) (fallback)
         if mode_bcd == 'sequential':
             if lr == 1:
                 M_iter = -np.linalg.pinv(D + L) @  U
@@ -774,14 +826,14 @@ def check_spectral_radius(X, p, mode_bcd="sequential", lam=1e-3, f_act="linear",
             M_J = -np.linalg.pinv(D) @ (L + U)
             M_iter = ((1.0 - lr) * np.eye(m) + lr * M_J) if lr else M_J
 
-    # Spectral radius (max abs. eigenvalue)
+    # Spectral radius (max abs. eigenvalue) (could also simply called `np.linalg.cond`)
     rho = np.max(np.abs(np.linalg.eigvals(M_iter)))
 
     return rho
 
 def compute_max_lr_parallel(X, p, lam=1e-3, f_act="linear"):
-    """Computes the theoretical maximum learning rate of convergen for the
-    'parallel' BCD ROLANN mode (Damped Jacobi) for a given split 'p'"""
+    # Computes the theoretical maximum learning rate of convergence of the
+    # 'parallel' mode of BCD_ROLANN (Damped Jacobi) for a given VFL split `p`
 
     # Split X according to the VFL split in p
     X_split = split_vfl_X(X.T, p)
@@ -811,13 +863,13 @@ def compute_max_lr_parallel(X, p, lam=1e-3, f_act="linear"):
         D[start_idx:end_idx, start_idx:end_idx] = A[start_idx:end_idx, start_idx:end_idx]
         start_idx = end_idx
 
-    # Compute max eigval of matrix (D^{-1} @ A)
+    # Compute max eigval of matrix (S = D^{-1} @ A) (could simply call `np.linalg.cond`)
     try:
         gammas = spla.eigvals(A, D) # A v = gamma D v
     except np.linalg.LinAlgError:
         gammas = np.linalg.eigvals(np.linalg.solve(D, A))
     
-    # Max learning rate
+    # Max learning rate: 2 / k_A (Sec. 5.2, pag. 38, equation (21) in VFL_ROLANN.pdf)
     gamma_max = np.max(np.real(gammas))
     lr_max = 2.0 / gamma_max
 
