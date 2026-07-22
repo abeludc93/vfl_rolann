@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+tests/test_classification.py
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example of a binary classification task with ROLANN/BCD_ROLANN
+and also with LogisticRegression/VFL_LR for a synthethic toy-dataset.
+It also contains an example of a multi-label classification task and
+a grid-search experiment.
+"""
 #%% DATASET CLASIFICACION
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split

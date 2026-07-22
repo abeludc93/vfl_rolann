@@ -1,9 +1,15 @@
-#%% FHE Esquema CKKS - TenSeal
+#!/usr/bin/env python3
 """
+tests/test_ckks.py
+~~~~~~~~~~~~
+Script that both 1) checks for a correct installation of the `tenseal` library
+and 2) simulates the operations under BCD_ROLANN in order to benchmark the comms
+and computational costs w/ an increasing number of clients and vector dimension.
+~~~~~~~~~~~~
+(INFO)
+
 Librería: `pip install tenseal` -> implementa FHE con esquema CKSS (sumas, restas, multiplicaciones)
-
 Pruebas simulando implementación en bucle iterativo BCD ROLANN.
-
 Pasos:
 
 (Cliente)
@@ -22,24 +28,11 @@ El cliente trabaja con datos en claro pero necesita encriptar/desencriptar al en
 El coordinador puede trabajar enteramente con datos cifrados (incluido el f_dbar).
 Esto implica un clave privada compartida por todos los clientes y una publica conocida solo por el coordinador.
 
-[TESTS]
-
+(TESTS)
 Simularemos 3 procesos:
-
 + Cliente:      1) Encriptar
                 2) Desencriptar
 + Coordinador:  3) Agregacion y calculo residuos
-
-Para tamaños de vector 'N' crecientes (muestras del dataset):
-
-    El overhead en los clientes se mantiene estable y la suma
-    en el coordinador también, aunque esta operación dure más.
-
-Para un numero creciente de nodos 'p':
-
-    Esperamos un incremento del tiempo de calculo del coordinador.
-    Los clientes no se verán afectados ya que "trabajan" en paralelo.
-
 """
 #%% [IMPORTS]
 import time
@@ -260,11 +253,11 @@ plot_commcosts(df_commcost)
 #%% OTHER CONSIDERATIONS
 """
 1.  A partially homomorphic encryption protocol was considered using a Paillier scheme that enables
-    sums and multiplications of encrypted scalars thinking it would be computationally less expensive
-    than a full-on FHE scheme such as CKKS.
-2.  Nonetheless, the Paillier implementations found in libraries such as `phe` currently do NOT support
-    vectorized operations, relying instead on element-by-element procedures that waste any meaninful
-    prior advantages over FHE.
+    sums of encrypted scalars and multiplications by non-encrypted scalars, thinking it would be 
+    computationally less expensive than a full-on FHE scheme such as CKKS.
+2.  Nonetheless, the Paillier implementations found in libraries such as `phe` do NOT support
+    efficient vectorized operations, relying instead on element-by-element procedures that waste
+    away any meaningful prior advantages over FHE.
 3.  In older tags of this project, an equivalent benchmark was conducted for a simulated PHE scenario
     that supports these considerations (search for `test_phe.py`)
 """

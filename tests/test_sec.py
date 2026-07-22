@@ -74,7 +74,8 @@ res_par
   b. privacidad total (el servidor agrega textos cifrados y no puede ver el resultado).
 
 Al final el SecureAgg es una especie de privacidad diferencial mucho mejor.
-En un escenario realista habría que ajustar tambien la máscara a la escala de los inputs Z_i de cada cliente, ya que si las máscaras aleatorias que aplica SecureAgg son ínfimas en relación a la escala del
-Z_i, poco lo camuflará.
- 
+En un escenario realista habría que ajustar tambien la máscara a la escala de los inputs Z_i de cada cliente,
+ya que si las máscaras aleatorias que aplica SecureAgg son ínfimas en relación a la escala del Z_i, poco lo camuflará.
+(se soluciona directamente normalizando cada matriz de datos local X_i)
+
 """

@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+tests/test_regression.py
+~~~~~~~~~~~~~~~~~~~~~~~~
+Equivalent to test_classification.py but for a regression task.
+It also contains an example of multi-output regression and a
+grid-search experiment with a toy-dataset.
+"""
+
 #%% [DATASET]
 from sklearn.datasets import make_regression
 from sklearn.model_selection import train_test_split
