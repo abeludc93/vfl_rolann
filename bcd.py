@@ -212,7 +212,7 @@ class BCDCoordinator:
             # suponemos clasificación
             _, negpos_tuple = map_labels(self.f_act)
             UMBRAL = 0.5 * sum(negpos_tuple)
-            y_pred = np.where(y_pred <= UMBRAL, 0, 1)
+            y_pred = np.where(pred <= UMBRAL, 0, 1)
             score = accuracy_score(true, y_pred)
 
         return score

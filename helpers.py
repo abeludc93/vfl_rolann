@@ -552,7 +552,7 @@ def get_bcd_class(impl='normal', ctx=None):
 def score2label(scores, labels=None, f_act='logs'):
     """
     Transforms prediction scores into prediction labels for both binary and multiclass classification.
-    `scores` are NOT probability estimations (!= `predict_proba` \in (0, 1)) but raw OUTPUTS of the model,
+    `scores` are NOT probability estimations (!= `predict_proba` in (0, 1)) but raw OUTPUTS of the model,
     so they depend on the mapping used for the activation function (`logs`).
     Example:    f_act='logs' typically implies mapping (0.05, 0.95) for NEG/POS classes
                 f_act='tanh' typically implies mapping (-.95,  .95) for NEG/POS classes
@@ -742,7 +742,7 @@ def check_condition(X, lam=1e-3, f_act="linear"):
 def check_condition_lr(X, D=0.25, lam=1e-3):
     # Computes condition number of the LogisticRegression|Ridge Hessian SDP matrix H_lr.
     # [H_lr = X.T D X + lam I], D is a diagonal matrix with elements d_ii = p_i*(1-p_i),
-    # being p_i \in (0, 1) the probability of sample 'i'.
+    # being p_i in (0, 1) the probability of sample 'i'.
     # If we start from max uncertainty -> p=0.5, wich explains the default value D=0.25
     # LR|Ridge and its VFL implementations are susceptable to bad conditioning, demanding
     # lower `learning_rate`'s. Theoretically, max_lr = 2 / k_Hlr

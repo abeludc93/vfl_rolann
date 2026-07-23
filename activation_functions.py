@@ -18,7 +18,8 @@ from sys import float_info as sys_flt
 # Third-party libraries
 from numpy import log, exp, ones, divide, ndarray, clip, where
 
-EPSILON = .05
+EPSILON = .05               # label mapping margins
+FLT_EPS = sys_flt.epsilon   # system float min value
 
 # LOG-SIGMOID activation functions:
 #   f(x) range (0, 1) → need to clamp inverse
@@ -28,8 +29,8 @@ def logsig(x):
 def _inv_logsig(x):
     return -log(divide(1, x) - 1)
 def inv_logsig(x):
-    x_clip = _inv_logsig(x)
-    return clip(x_clip, 0+sys_flt, 1-sys_flt)   # clamp input to (0, 1)
+    x_clip = clip(x, 0+FLT_EPS, 1-FLT_EPS)      # clamp input to (0, 1)
+    return _inv_logsig(x_clip)
 def der_logsig(x):
     return 1 / ((1 + exp(-x)) ** 2) * exp(-x)   # = logsig(x) (1 - logsig(x))
 
@@ -49,8 +50,8 @@ def tanhip(x):
 def _inv_tanhip(x):
     return 0.5 * log((1 + x) / (1 - x))
 def inv_tanhip(x):
-    x_clip = _inv_tanhip(x)
-    return clip(x_clip, -1+sys_flt, 1-sys_flt)  # clamp input to (-1, 1)
+    x_clip = clip(x, -1+FLT_EPS, 1-FLT_EPS)     # clamp input to (-1, 1)
+    return _inv_tanhip(x_clip)
 def der_tanhip(x):
     return 1 - tanhip(x)**2
 
