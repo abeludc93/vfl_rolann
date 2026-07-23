@@ -220,7 +220,7 @@ class BCDCoordinator:
     # [Funciones protegidas para fit(): sobreescribir en clases hijas para modificar su comportamiento]
     def _reset(self, hard=False):
         # Borramos vars auxiliares coord. y reseteamos clientes
-        if hasattr(self, '_i_lr'):          delattr(self, '_i_lr')
+        if hasattr(self, '_iter_lr'):       delattr(self, '_iter_lr')
         if hasattr(self, '_diff_Z_old'):    delattr(self, '_diff_Z_old')
         if hasattr(self, '_Xtest'):         delattr(self, '_Xtest')
         if hasattr(self, '_ytest'):         delattr(self, '_ytest')
@@ -357,7 +357,7 @@ class BCDCoordinator:
         # (Sección 5.3 en VFL_ROLANN.pdf) -> descartamos heurística en modo 'sequential'
 
         # Contadores auxiliares para fase transitoria y ruido numerico
-        if not hasattr(self, '_i_lr'):          self._iter_lr = 0
+        if not hasattr(self, '_iter_lr'):       self._iter_lr = 0
         if not hasattr(self, '_diff_Z_old'):    self._diff_Z_old = 0
 
         # Función auxiliar para redondear hacia abajo con un nº determinado de decimales

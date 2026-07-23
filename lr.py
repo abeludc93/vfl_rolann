@@ -154,7 +154,7 @@ class LRClient:
             self.g_old_ = grad.copy()
 
             # Calcular dirección de descenso y actualizar peso según 'lr'
-            grad = -self.H @ grad
+            grad = -self.H_ @ grad
             self.w_ = self.w_ + lr * grad
        
         # Debug
