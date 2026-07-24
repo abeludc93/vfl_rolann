@@ -674,7 +674,7 @@ def obtain_global_scores(dfs, test_data, train_data, f_act, skmetricfn, labels=N
     Xtest, ytest    = test_data
     Xtrain, ytrain  = train_data
 
-    df_wi = pd.concat([df.w_i for df in dfs], axis=1)
+    df_wi = pd.concat([df.w_i for df in dfs], axis=1).ffill()
     df_wi.columns = [f"w_{i+1}" for i in range(len(dfs))]
 
     f, _,  _ = load_act_fn(f_act)

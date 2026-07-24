@@ -58,7 +58,9 @@ def plot_sns(df, plot_log=True, tol=None, title="", **kwargs):
     ax.grid(True, which="both", ls="--", alpha=0.5) # Grid visible incluso en escala log
     
     # Leyenda fuera del gráfico
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    legend = kwargs.get('legend', True)
+    if legend:
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
     if ax is None:
         plt.tight_layout() 

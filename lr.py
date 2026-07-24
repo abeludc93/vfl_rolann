@@ -208,7 +208,7 @@ class LRCoordinator:
         # This method resembles the BCD_ROLANN coordinator `fit` base logic for the VFL_LR models.
 
         # [INIT HISTORY]
-        print(f"Iniciando VFL {type(self)} (modo={method}, taylor={taylor}, reg_bias={reg_bias}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
+        print(f"Iniciando VFL {self.__class__.__name__} (modo={method}, taylor={taylor}, reg_bias={reg_bias}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
         self.hparams = {'max_iter': max_iter, 'tol': tol, 'lr': lr, 'mode': method, 'taylor': taylor, 'p': len(self.clients), 'init': init}
         self.history = {'diff_w': [], 'diff_Z': [], 'diff_w_lr': [], 'loss':[], 'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
         # [RESET]

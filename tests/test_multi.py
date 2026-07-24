@@ -60,6 +60,7 @@ for i in range(len(classes)):
     mdl_lst.append(mdl)
 
 # Score
+w_rolann= np.hstack([mdl.w_ for mdl in mdl_lst])
 pred    = np.hstack([mdl.predict(X_test) for mdl in mdl_lst])   # shape (2000, 3)
 y_pred  = score2label(pred, labels=classes, f_act=f_act)
 
@@ -90,10 +91,52 @@ from sklearn.metrics import accuracy_score
 from bcd import BCDClient, BCDCoordinator
 num_outputs = len(classes)
 
+# [CLIENTS & COORDINATOR]
+clients = [BCDClient(id=i+1,          # clients should be numbered starting from 1
+                     X=X_lst_T[i],    # local data matrix
+                     lam=lam,         # l2 reg no need for reciprocal C
+                     debug=True)      # save client history
+                for i in range(num_nodos)]
+
+coords  = [BCDCoordinator(clients=clients,                       # client list shared among coords
+                          d=y_train_one[:, n],                   # real/desired outputs
+                          f_act='logs',                          # act fn
+                          test_data=(X_test.T, y_test_one[:, n]),# test_data
+                          w_rolann=w_rolann[:, n])               # optim. weights for LR
+                for n in range(num_outputs)]                     # as many coords as outputs
+
+# [FIT PARAMS]
+max_iter    = 100
+lam         = 0.001
+tol         = 1e-4
+lr          = 0.75
+init        = 'zero'
+heur        = False
+
+# [RUN]
+for i, coord in enumerate(coords):
+    print(f"Training BCD_ROLANN on class/output {i+1}/{num_outputs}...")
+    coord.fit(max_iter=max_iter, tol=tol, lr=lr, init=init, heur=heur, mode='parallel')
+dfs_bcd = [c.get_results(name=f'class_{i+1}') for i, c in enumerate(coords)]
+
+# [SCORE]
+w_vfllr     = np.hstack([c.w_ for c in coords])
+pred_train  = predict_models(X_train.T, coords)
+pred_test   = predict_models(X_test.T, coords)
+ypred_train = score2label(pred_train, classes, f_act='logs')
+ypred_test  = score2label(pred_test, classes, f_act='logs')
+acc_train   = accuracy_score(y_train, ypred_train)
+acc_test    = accuracy_score(y_test, ypred_test)
+print(f"BCD_ROLANN acc: {acc_test:.2f}")
+
+# [RESULTS]
+dfs_bcd   = [c.get_results(name=f'output_{i}') for i, c in enumerate(coords)]
+
+
 #%% [6. VFL_LR]
 from lr import LRClient, LRCoordinator
 
-# CLIENTS & COORDINATOR
+# [CLIENTS & COORDINATOR]
 clients_lr = [LRClient(id=i+1,          # clients should be numbered starting from 1
                        X=X_lst_T[i],    # local data matrix
                        lam=lam,         # l2 reg no need for reciprocal C
@@ -106,7 +149,7 @@ coords_lr  = [LRCoordinator(clients=clients_lr,                     # client lis
                             w_lr=w_lr.T[:, n])                      # optim. weights for LR
                 for n in range(num_outputs)]                        # as many coords as outputs
 
-# FIT PARAMS
+# [FIT PARAMS]
 max_iter    = 500
 lam         = 0.001
 tol         = 1e-4
@@ -114,22 +157,62 @@ lr          = 0.75
 reg_bias    = True
 taylor      = False
 
-# RUN
+# [RUN]
 for i, coord in enumerate(coords_lr):
     print(f"Training VFL_LR on class/output {i+1}/{num_outputs}...")
     coord.fit(max_iter=max_iter, tol=tol, lr=lr, reg_bias=reg_bias, taylor=taylor, method='gd')
 dfs_lr = [c.get_results(name=f'class_{i+1}') for i, c in enumerate(coords_lr)]
 
-# SCORE
+# [SCORE]
 w_vfllr     = np.hstack([c.w_ for c in coords_lr])
-score_train = predict_models(X_train.T, coords_lr)
-score_test  = predict_models(X_test.T, coords_lr)
-pred_train  = score2label(score_train, classes, f_act='logs')
-pred_test   = score2label(score_test, classes, f_act='logs')
-acc_train   = accuracy_score(y_train, pred_train)
-acc_test    = accuracy_score(y_test, pred_test)
+pred_train  = predict_models(X_train.T, coords_lr)
+pred_test   = predict_models(X_test.T, coords_lr)
+ypred_train = score2label(pred_train, classes, f_act='logs')
+ypred_test  = score2label(pred_test, classes, f_act='logs')
+acc_train   = accuracy_score(y_train, ypred_train)
+acc_test    = accuracy_score(y_test, ypred_test)
+print(f"VFL_LR acc: {acc_test:.2f}")
 
+# [RESULTS]
+dfs_vfllr   = [c.get_results(name=f'output_{i}') for i, c in enumerate(coords_lr)]
 
 #%% [7. PLOTTERS]: TODO enseñar como juntar scores OvR con globales con helpers y hacer subplots
+from plotters import plot_sns
+from helpers import obtain_global_scores
+import matplotlib.pyplot as plt
+
+# This dataframe contains both OvR (individual) and global metrics per iteration 
+global_bcd_scores = obtain_global_scores(dfs_bcd,                       # list of coord results
+                                         train_data=(X_train.T, y_train), # train data
+                                         test_data=(X_test.T, y_test),    # test data
+                                         f_act='logs',                    # act fn used
+                                         skmetricfn=accuracy_score,       # callable metric
+                                         labels=classes)                  # class labels
+
+global_vfllr_scores = obtain_global_scores(dfs_vfllr,                       # list of coord results
+                                           train_data=(X_train.T, y_train), # train data
+                                           test_data=(X_test.T, y_test),    # test data
+                                           f_act='logs',                    # act fn used
+                                           skmetricfn=accuracy_score,       # callable metric
+                                           labels=classes)                  # class labels
+
+# Example of subplots with seaborn capabilities through `plot_sns`
+fig, axes = plt.subplots(4, 2, figsize=(10, 20))
+for i in range(num_outputs):
+    plot_sns(global_bcd_scores, plot_log=False, tol=None, title='BCD_ROLANN',
+             **{'x':'iter', 'y':f'score_test_{i+1}', 'ax':axes[i, 0], 'legend':False})
+    plot_sns(global_vfllr_scores, plot_log=False, tol=None, title='VFL_LR',
+             **{'x':'iter','y':f'score_test_{i+1}', 'ax':axes[i, 1], 'legend':False})
+plot_sns(global_bcd_scores, plot_log=False, tol=None, title='BCD_ROLANN global',
+         **{'x':'iter','y':'score_test', 'ax':axes[3, 0], 'legend':False})
+plot_sns(global_vfllr_scores, plot_log=False, tol=None, title='VFL_LR global',
+         **{'x':'iter','y':'score_test', 'ax':axes[3, 1] ,'legend':False})
 
 
+#%% [FINAL]
+#   Multi-output regression is an analogous process requiring a 'linear' act. function
+#   for BCD_ROLANN and instantiating VFL Ridge (RidgeClient, RidgeCoordinator) instead
+#   of VFL_LR.
+#   `helpers.py` contains wrapper functions for the instantiation, fitting and scoring
+#   of these pairs of VFL models, namely: `fit_bcd_models`, `fit_lrvfl_models`, `run_g
+#   rid_search` and `run_grid_search_lr`. See `tests/test_run.py` for an usage example.
