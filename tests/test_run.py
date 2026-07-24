@@ -152,8 +152,8 @@ df_vfl = merge_df_gridsearch(exps_vfl, name='example_vfl_grid')
 #%% [PLOT]
 from plotters import plot_sns, SNS_PARAMS
 
-plot_sns(df_bcd, **SNS_PARAMS|{'hue': 'f_act'})
-plot_sns(df_vfl, **SNS_PARAMS|{'hue':'taylor'})
+plot_sns(df_bcd, tol=bcd_grid['tol'], title="BCD_GRID", **SNS_PARAMS|{'hue': 'f_act'})
+plot_sns(df_vfl, tol=vfl_grid['tol'], title="BCD_GRID", **SNS_PARAMS|{'hue':'taylor'})
 # For futher filtering, it is advised to use
 # df.query("col1 == @var1 and col2 > @var2 or col3 in @lst3")
 

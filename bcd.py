@@ -239,8 +239,9 @@ class BCDCoordinator:
         self.history = {'diff_w': [], 'diff_Z': [], 'diff_w_rolann': [], 'lr': [],
                         'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
         # Info estática sobre la ejecución (siempre fijas)
+        num_p, fact = len(self.clients), self.f_act
         self.hparams = {'max_iter': max_iter, 'tol': tol, 'mode': mode, 'init': init,
-                        'p': len(self.clients), 'heur': heur, 'time_setup': t_setup}
+                        'p': num_p, 'f_act': fact, 'heur': heur, 'time_setup': t_setup}
 
     def _init_params(self, init):
         # Variables bucle BCD_ROLANN:
