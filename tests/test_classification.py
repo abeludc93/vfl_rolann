@@ -216,3 +216,5 @@ df_merged_lr = pd.concat([df_gd, df_gd_taylor, df_bfgs, df_bfgs_taylor])
 plot_sns(df_merged_lr, tol=tol, **SNS_PARAMS|{'hue':'name'})
 plot_weights_comparison(w_rolann, w_lr, label_w1='ROLANN', label_w2='LR', title='Optim. weights')
 plot_weights_comparison(coord.w_, coord_lr.w_, label_w1='BCD ROLANN', label_w2='VFL LR', title='VFL weights')
+
+#%%
