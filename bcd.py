@@ -490,7 +490,7 @@ class BCDClient_sec(BCDClient):
         # Constructor
         super().__init__(id, X, f_act, lam, debug)
         self.ss     = ss        # Shared secrets dictionary
-
+        
     def _init_rngs(self):
         self._rngs = {}
         nclients = len(self.ss)
@@ -532,7 +532,7 @@ class BCDCoordinator_sec(BCDCoordinator_par):
 
         # Comprobamos si los clientes ya tienen las claves de intercambio
         if all([c.ss for c in self.clients]):   return
-        
+
         # Generamos diccionario de intercambio Diffie-Hellman
         keys = Parallel(n_jobs=-1, require='sharedmem', prefer='threads')(
             delayed(client.generate_dh_keys)() for client in self.clients
@@ -544,6 +544,23 @@ class BCDCoordinator_sec(BCDCoordinator_par):
             client.ss = ss[i]
         print(f"Setup - DH pairwise keys done!")
 
+    def _parallel_iteration(self, d_bar, Z, z_dict, lr):
+        # Sobreescribimos método ya que necesitamos despachar un update_client particular
+        results = Parallel(n_jobs=-1, require='sharedmem', prefer='threads')(
+            delayed(_update_client_sec)(c, d_bar, Z, lr) 
+            for c in self.clients
+        )
+        z_dict = dict(results)
+        Z = sum(z_dict.values())
+        return Z, z_dict
+
+    def _sequential_iteration(self, d_bar, Z, z_dict, lr=1):
+        raise NotImplementedError(
+            "(SecAgg) is incompatible with the sequential (Gauss-Seidel) mode. " \
+            "The random masks require strict parallel updates in order to mutually cancel each other."
+            )
+
+
 # Función auxiliar para SecureAgg: intercambio claves
 def compute_pairwise_dh(priv_keys, pub_keys):
     n = len(priv_keys)
@@ -554,3 +571,10 @@ def compute_pairwise_dh(priv_keys, pub_keys):
             shared = priv_keys[i].exchange(pub_keys[j])
             ss[i][j] = ss[j][i] = shared
     return ss
+
+# Función auxiliar para actualización de clientes SecureAgg
+def _update_client_sec(client, d_bar, Z_global, lr):
+    z_i_clear = BCDClient.get_net_input(client) # input en claro para no calcular un residuo con ruido
+    e_i = d_bar - (Z_global - z_i_clear)
+    client.update_weights(e_i, lr)
+    return client.id, client.get_net_input()
