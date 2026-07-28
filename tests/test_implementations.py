@@ -55,7 +55,7 @@ bcd_grid = {
     'lr':       [0.25],                         # learning rates
     'tol':      [0],                            # tolerance
     'max_iter': [100],                          # max iterations
-    'bcd_impl': ['normal', 'sec', ],# BCD ROLANN implementations
+    'bcd_impl': ['normal', 'par', 'sec', 'fhe'],# BCD ROLANN implementations
     'ctx':      [context],                      # TenSeal context for fhe impl
 
 }   # TOTAL: 4*4 = 16 RUNS
@@ -71,7 +71,7 @@ for _, bcd in exps_bcd:
 df_bcd = pd.concat(df_lst)
 df_bcd = df_bcd.assign(total_time=total_time(df_bcd))
 w_rolann = exps_bcd[0][0][0].w_
-w_bcd = df_bcd.query("p == 2").w_i.values[-1]
+w_bcd = df_bcd.query("p == 2 and name =='BCDCoordinator_fhe_0'").w_i.values[-1]
 
 #%% [3. PLOTTERS]
 from plotters import plot_sns, SNS_PARAMS, plot_im_split, plot_im_weights

@@ -22,11 +22,11 @@ Tanto el BCD como el ROLANN expuestos aquí no permiten multi-output, por lo que
 ## DESCRIPCION FICHEROS
 
 + `activation_functions.py`: definidas las funciones de activación utilizadas.
-+ `decorators.py`: decoradores para limitar dominio/rango de las f.act.
-+ `bcd.py`: implementación del algoritmo de cliente y coordinador del BCD para ROLANN.
 + `helpers.py`: funciones auxiliares para VFL (dividir matrices de datos, etc)
 + `plotters.py`: funciones auxiliares para grafica resultados.
-+ `rolann.py`: implementación muy básica del algoritmo original ROLANN (para benchmark).
++ `rolann.py`: implementación básica del algoritmo original ROLANN.
++ `bcd.py`: implementación del algoritmo de cliente y coordinador del BCD ROLANN.
++ `lr.py`: implementación sencilla de un modelo LogisticRegression|Ridge en VFL (uso como benchmark).
 
 
 Por último, las mencionadas pruebas `test_bcd_*.py`.
