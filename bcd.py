@@ -91,9 +91,10 @@ class BCDClient:
 
         # Debug
         if self.debug:
+            z_i = self.Xp.T @ self.w    # avoids calling get_net_input on fhe impl
             self.history['norm_grd'].append(np.linalg.vector_norm(w_new))
             self.history['norm_res'].append(np.linalg.vector_norm(e_i))
-            self.history['norm_inp'].append(np.linalg.vector_norm(self.get_net_input()))
+            self.history['norm_inp'].append(np.linalg.vector_norm(z_i))
 
         return self.w
     
@@ -313,9 +314,9 @@ class BCDCoordinator:
         # Guarda la información relevante de la iteracion:
 
         w = np.concatenate([c.w for c in self.clients])         # pesos iter
-        diff_w = np.linalg.vector_norm(w - w_iter)              # respecto a pesos anteriores
-        Z_metric = self._get_Z_for_metrics(Z)                   # residuo iter
-        diff_Z = np.linalg.vector_norm(Z_metric - Z_iter)       # respecto a residuos anteriores
+        diff_w = np.linalg.vector_norm(w - w_iter)              # respecto a pesos anteriores                  # residuos iter
+        Z_metric = self._get_Z_for_metrics(Z - Z_iter)          # residuos iter anterior
+        diff_Z = np.linalg.vector_norm(Z_metric)              # respecto a residuos anteriores
 
         # (1) Info convergencia
         self.history['diff_w'].append(diff_w)
@@ -332,7 +333,7 @@ class BCDCoordinator:
             ypred_test = f(self._Xtest.T @ w)
             score_test = self.simple_score(self._ytest, ypred_test)
             self.history['score_test'].append(score_test)
-        ypred_train = f(Z)              # Train
+        ypred_train = f(self._get_Z_for_metrics(Z)) # Train
         ytrain = self.d.reshape([-1, 1])
         score_train = self.simple_score(ytrain, ypred_train)
         self.history['score_train'].append(score_train)
@@ -444,6 +445,13 @@ class BCDClient_fhe(BCDClient):
         e_i = np.asarray(e_i_lst).reshape(-1, 1)        # lista a vector columna
         return super().update_weights(e_i, lr)
 
+    def set_ctx(self, ctx):
+        # Setter de contexto tenSeal
+        self.ctx = ctx
+
+    def _decrypt(self, Z):
+        assert self.ctx is not None and self.ctx.has_secret_key()
+        return Z.decrypt(self.ctx.secret_key())        
 
 class BCDCoordinator_fhe(BCDCoordinator_par):   # solo sobreescrible los "bloques" que hace diferente
     def __init__(self, clients, d, f_act, test_data=None, w_rolann=None, ctx=None):
@@ -466,8 +474,9 @@ class BCDCoordinator_fhe(BCDCoordinator_par):   # solo sobreescrible los "bloque
 
     def _get_Z_for_metrics(self, Z):
         # En el bucle de BCD_ROLANN `Z` es un CKKSVector pero para el historial y
-        # debug obtenemos este dato en claro llamando directamente a la superclase
-        return sum([super(BCDClient_fhe, c).get_net_input() for c in self.clients])
+        # debug obtenemos este dato en claro llamando directamente a la superclas
+        return self.clients[0]._decrypt(Z)
+        #return sum([super(BCDClient_fhe, c).get_net_input() for c in self.clients])
     
     def set_ctx(self, ctx):
         # Setter de contexto tenSeal
@@ -481,18 +490,25 @@ class BCDClient_sec(BCDClient):
         # Constructor
         super().__init__(id, X, f_act, lam, debug)
         self.ss     = ss        # Shared secrets dictionary
-        
-    def get_net_input(self):
-        # Obtenemos el input y lo camuflamos sumando y restando
-        # máscaras aleatorias con las semillas guardadas en `ss`
-        nclients = len(self.ss)
-        z = super().get_net_input()
 
-        mask = np.zeros_like(z, dtype=float)
+    def _init_rngs(self):
+        self._rngs = {}
+        nclients = len(self.ss)
         for j in range(nclients):
             if j + 1 == self.id:continue
-            ss_j = self.ss[j]
-            rng = np.random.default_rng(int.from_bytes(ss_j[:8], "little"))
+            seed = int.from_bytes(self.ss[j][:8], "little")
+            self._rngs[j] = np.random.default_rng(seed)
+    
+    def get_net_input(self):
+        # Obtenemos el input y lo camuflamos sumando y restando
+        # máscaras aleatorias con las semillas guardadas en `ss` y `_rngs`
+        z = super().get_net_input()
+
+        if self.ss is not None and getattr(self, '_rngs', None) is None:
+            self._init_rngs()
+        
+        mask = np.zeros_like(z, dtype=float)
+        for j, rng in self._rngs.items():
             m = rng.normal(size=z.shape)
             if self.id < j + 1: mask += m
             else:               mask -= m
@@ -513,6 +529,9 @@ class BCDCoordinator_sec(BCDCoordinator_par):
     def _precompute_clients(self):
         # Precomputo paralelo
         super()._precompute_clients()
+
+        # Comprobamos si los clientes ya tienen las claves de intercambio
+        if all([c.ss for c in self.clients]):   return
         
         # Generamos diccionario de intercambio Diffie-Hellman
         keys = Parallel(n_jobs=-1, require='sharedmem', prefer='threads')(
