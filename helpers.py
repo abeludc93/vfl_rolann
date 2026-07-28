@@ -268,19 +268,16 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
             w_r = arrange_weights_by_split(w_r, p)
             w_rolann[i] = w_r
 
-    # Adecuamos salidas/targets `y` a la tarea:
+    # Adecuamos salidas/targets `y` a la tarea:  vector columna y one-hot
+    y_target = y_train if y_train.ndim > 1 else y_train.reshape([-1, 1])
+    y_test = ytest if ytest.ndim > 1 else ytest.reshape([-1, 1])
     if mode == 'ovr':
         # En caso de 'ovr' hacemos one-hot sobre `y`
         classes = np.unique(y_train)
         assert len(classes) == len(np.unique(ytest))    # mismas clases en train que en test
-        y_target = np.hstack([(y_train == cls).astype(int) for cls in classes])
-        y_test = np.hstack([(ytest == cls).astype(int) for cls in classes])
-    else:
-        # En el resto de casos ('binary' | 'regression' | 'multioutput')
-        # solo aseguramos forma de vector columna
-        y_target = y_train if y_train.ndim > 1 else y_train.reshape([-1, 1])
-        y_test = ytest if ytest.ndim > 1 else ytest.reshape([-1, 1])
-
+        y_target = np.hstack([(y_target == cls).astype(int) for cls in classes])
+        y_test = np.hstack([(y_test == cls).astype(int) for cls in classes])
+    
     # Clientes y coordinador
     num_nodos = len(X_lst_T)
     num_outputs = y_target.shape[1]
@@ -289,8 +286,8 @@ def fit_bcd_models(X_train, y_train, mode='ovr', **params):
                     for i in range(num_nodos)]
     lst_coords = [Coord(clients=lst_clients, f_act=f_act, d=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_rolann=w_rolann[n])
                   for n in range(num_outputs)]
-    [c.set_ctx(ctx) for c in lst_coords if bcd_impl == 'fhe'];  # fix para introducir ctx en fhe
-
+    [c.set_ctx(ctx) for c in lst_clients + lst_coords if bcd_impl == 'fhe'];  # fix para meter ctx en fhe
+    
     # Fit
     for i, coord in enumerate(lst_coords):
         print(f"Entrenando BCD ROLANN para clase-salida {i+1}/{num_outputs}...")
@@ -538,7 +535,7 @@ def get_bcd_class(impl='normal', ctx=None):
     }
     # Validaciones
     if impl not in impl_dict:
-        raise ValueError(f"Implementación desconocida ({impl}): {list(impl.keys())}")
+        raise ValueError(f"Implementación desconocida ({impl}): {list(impl_dict.keys())}")
     elif impl == 'fhe' and ctx is None:
         raise ValueError(f"Implementación FHE necesita un contexto tenSeal (`ctx`).")
     else:

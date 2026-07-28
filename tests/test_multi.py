@@ -176,8 +176,8 @@ print(f"VFL_LR acc: {acc_test:.2f}")
 # [RESULTS]
 dfs_vfllr   = [c.get_results(name=f'output_{i}') for i, c in enumerate(coords_lr)]
 
-#%% [7. PLOTTERS]: TODO enseñar como juntar scores OvR con globales con helpers y hacer subplots
-from plotters import plot_sns
+#%% [7. PLOTTERS]:
+from plotters import plot_sns, plot_score_global
 from helpers import obtain_global_scores
 import matplotlib.pyplot as plt
 
@@ -207,6 +207,10 @@ plot_sns(global_bcd_scores, plot_log=False, tol=None, title='BCD_ROLANN global',
          **{'x':'iter','y':'score_test', 'ax':axes[3, 0], 'legend':False})
 plot_sns(global_vfllr_scores, plot_log=False, tol=None, title='VFL_LR global',
          **{'x':'iter','y':'score_test', 'ax':axes[3, 1] ,'legend':False})
+
+# Same graph plotting the different scores on the same ax
+plot_score_global(global_bcd_scores, classes, title="BCD ROLANN")
+plot_score_global(global_vfllr_scores, classes, title="VFL LR")
 
 
 #%% [FINAL]

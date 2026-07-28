@@ -130,7 +130,7 @@ def plot_correlation_map(X, title="Matriz de correlación entre variables"):
     plt.ylabel("Variable")
     plt.show()
 
-def plot_score_global(df, labels, ylabel="Accuracy"):
+def plot_score_global(df, labels, ylabel="Accuracy", title=None):
     # Graphs two subplots showing both OvR and global train/test scores.
 
     x = df['iter']
@@ -153,6 +153,8 @@ def plot_score_global(df, labels, ylabel="Accuracy"):
     axes[0].set_title("Score test")
     axes[1].set_title("Score train")
     plt.legend(loc='center', bbox_to_anchor=(1.25, 0.5), fancybox=True, shadow=True)
+    if title is not None:
+        plt.suptitle(title)
     plt.tight_layout()
     plt.show()
 
