@@ -4,29 +4,34 @@ Esta carpeta contiene los ficheros esenciales necesarios para lanzar las pruebas
 
 He seleccionado y adaptado los ficheros del repositorio ROLANN para que no sea necesario instalar el repositorio como módulo de Python ni nada parecido.
 
-Los ficheros con los primeros tests (`test_bcd_*.py`) se deberían de ejecutar sin problemas.
+Los ficheros con los primeros tests (`test_bcd_*.py`) se deberían de ejecutar sin problemas. Se recomienda ejecutar en VSCode o cualquier otro editor los ficheros de pruebas `test_bcd_*.py` para ver los primeros resultados y entender la estructura del código.
 
-El fichero principal es `bcd.py`, donde están tanto las clases de cliente como coordinador del BCD ROLANN. Hay dos variantes (`BCDClient|BCDCoordinator` y `BCDClient_alt|BCDCoordinator_alt`).
-Ambos son equivalentes y producen los mismos resultados pero la versión alternativa implementa los cálculos con operaciones más eficientes (*numpy broacasting*) e implementa una paralelización realista del bucle BCD (mediante librería *joblib* de Python).
+El fichero principal es `bcd.py`, donde están tanto las clases de cliente como coordinador del BCD ROLANN. Hay varias variantes: la original (`BCDClient|BCDCoordinator`), la que usa paralelización (`BCDClient_par|BCDCoordinator_par`) y otras dos variantes basadas en esta última que usan distintas técnicas de computación segura, (`BCDClient_sec|BCDCoordinator_sec`) para SecureAgg y (`BCDClient_fhe|BCDCoordinator_fhe`) para FHE. Todas son equivalentes y producen los mismos resultados. La versión original es más fácil de *debuggear*.
 
-Se recomienda ejecutar en VSCode o cualquier otro editor los ficheros de pruebas `test_bcd_*.py` para ver los primeros resultados y entender el desglose del código.
-
-Tanto el BCD como el ROLANN expuestos aquí no permiten multi-output, por lo que para tareas de regresión con varias salidas o tareas de clasificación multiclase (ya que se convierte en 'k' modelos tipo OneVsAll binarios) hay que hacerlo de manera manual, generando un modelo por salida y calculando las métricas finales globales.
+Tanto el BCDROLANN como el ROLANN expuestos aquí no permiten multi-output de forma nativa, pero para tareas de regresión con varias salidas o tareas de clasificación multiclase se ofrecen *wrappers* que generan un modelo por salida y se calculan luego las métricas finales globales (ver `test_bcd_multi.py`).
 
 ---
 
 ## REQUISITOS:
 
-+ Python >= 3.10 con: numpy, pandas, matplotlib, seaborn y sklearn: `pip install numpy pandas matplotlib seaborn sklearn`
++ Python >= 3.10 con: numpy, pandas, scipy, matplotlib, seaborn, sklearn, tenseal y criptography. Para un versionado exacto consultar `requirements.txt`.
++ Se recomienda el uso de un entorno virtual para no mezclar dependencias.
 
 ## DESCRIPCION FICHEROS
 
-+ `activation_functions.py`: definidas las funciones de activación utilizadas.
-+ `helpers.py`: funciones auxiliares para VFL (dividir matrices de datos, etc)
-+ `plotters.py`: funciones auxiliares para grafica resultados.
++ `activation_functions.py`: funciones de activación utilizadas y mapeo de clases.
++ `helpers.py`: funciones auxiliares para VFL (dividir matrices de datos, etc).
++ `plotters.py`: funciones para graficar resultados.
 + `rolann.py`: implementación básica del algoritmo original ROLANN.
 + `bcd.py`: implementación del algoritmo de cliente y coordinador del BCD ROLANN.
-+ `lr.py`: implementación sencilla de un modelo LogisticRegression|Ridge en VFL (uso como benchmark).
++ `lr.py`: implementación básica de un modelo LR|Ridge en VFL (para uso como benchmark).
 
+Bajo `/tests`, las mencionadas pruebas `test_bcd_*.py`.
 
-Por último, las mencionadas pruebas `test_bcd_*.py`.
+Bajo `/experiments`, las experimentos realizados una selección de datasets reales.
+
+---
+
+## TODO
+
+1. En `lr.py` no existe ninguna versión de LR|Ridge_VFL con una paralelización real a través de `joblib` equivalente a `BCDClient_par|BCDCoordinator_par`. En caso de hacer comparativas en los experimentos entre ellos, es necesario antes su implementación.
