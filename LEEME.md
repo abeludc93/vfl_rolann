@@ -14,8 +14,9 @@ Tanto el BCDROLANN como el ROLANN expuestos aquí no permiten multi-output de fo
 
 ## REQUISITOS:
 
-+ Python >= 3.10 con: numpy, pandas, scipy, matplotlib, seaborn, sklearn, tenseal y criptography. Para un versionado exacto consultar `requirements.txt`.
++ Python >= 3.11 con: numpy, pandas, scipy, matplotlib, seaborn, sklearn, tenseal y criptography. Para un versionado exacto consultar `requirements.txt`.
 + Se recomienda el uso de un entorno virtual para no mezclar dependencias.
++ TODO: hacer un optional con VertiBench por que descarga demasiadas dependencias -> torch, cuda, nvidia-*
 
 ## DESCRIPCION FICHEROS
 
