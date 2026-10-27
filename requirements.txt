@@ -13,3 +13,4 @@ seaborn==0.13.2
 # Encriptación
 tenseal==0.3.16
 cryptography==46.0.3
+cffi==2.1.1
