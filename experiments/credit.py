@@ -79,10 +79,11 @@ X['MARRIAGE'] = X['MARRIAGE'].replace({0: 3})               # Agrupamos el 0 en 
 X_cat_demo = pd.get_dummies(X[cat_demo_cols], columns=cat_demo_cols, dtype=int)
 X_final = pd.concat([X[pay_cols + num_demo_cols], X_cat_demo], axis=1)
 
-# División datos: 70-30
+# División datos: 70-30 train-(val,test)
 Xtrain, Xvaltest, ytrain, yvaltest = \
     train_test_split(X_final, y, test_size=0.3, stratify=y, random_state=SEED)
 
+# División datos: 50-50 val-test
 Xval, Xtest, yval, ytest = \
     train_test_split(Xvaltest, yvaltest, test_size=0.5, stratify=yvaltest, random_state=SEED)
 
@@ -91,82 +92,47 @@ Xtrainbal, ytrainbal = balance_train_data(Xtrain, ytrain)
 
 # Normalización (datos entrada)
 scaler = StandardScaler().set_output(transform='pandas')
-scaler.fit(Xtrainbal)
+scaler.fit(Xtrain)
 
+Xtrain      = scaler.transform(Xtrain)
 Xtrainbal   = scaler.transform(Xtrainbal)
 Xval        = scaler.transform(Xval)
 Xtest       = scaler.transform(Xtest)
 
-X_train = Xtrainbal.to_numpy()
-X_val   = Xval.to_numpy()
-X_test  = Xtest.to_numpy()
-y_train = ytrainbal.to_numpy()
-y_val   = yval.to_numpy()
-y_test  = ytest.to_numpy()
+# Numpy
+X_train     = Xtrain.to_numpy()
+X_train_bal = Xtrainbal.to_numpy()
+X_val       = Xval.to_numpy()
+X_test      = Xtest.to_numpy()
+y_train     = ytrain.to_numpy()
+y_train_bal = ytrainbal.to_numpy()
+y_val       = yval.to_numpy()
+y_test      = ytest.to_numpy()
 
 # %% [ROLANN HIPERPARAMS]
-f_act = 'logs'
-lam = 1e-3
+from sklearn.model_selection import ParameterGrid
+f_act = ['tanhip','logs']
+lam = [1e-3, 1e-2, 1e-1, 1]
 rolann_params = {'f_act':f_act, 'lam': lam}
-rolann_grid = {k:[v] for k,v in rolann_params.items()}
+rolann_grid = list(ParameterGrid(rolann_params))
 
 # %% [CONDICIONAMIENTO]
 from helpers import check_condition
+for params in rolann_grid:
+    k_A = check_condition(X_train, **params)
+    k_A_bal = check_condition(X_train_bal, **params)
+    print(f"Cond: {k_A:10.2f} Cond_bal: {k_A_bal:10.2f} | {params}")
+# ↑ reg = ↓ cond , bal = ↓ cond
 
-k_A = check_condition(X_train, **rolann_params)
-k_A_orig = check_condition(X_train_orig.to_numpy(), **rolann_params)
-
-print(f"Condicionamiento A escalada: {k_A:.2f}")
-print(f"Condicionamiento A sin escalar: {k_A_orig:.2f}")
-print(f"\tReducción en razón del orden de: {100 * k_A_orig/k_A:.2e}")
-""" ROLANN
-Condicionamiento A escalada: 134426.48
-Condicionamiento A sin escalar: 3119082708406449.50
-	Reducción en razón del orden de: 2.32e+12
-"""
-#%% [COMENTARIOS]
-""" LR
-Para condicionamiento de (X^T @ X): 3.76e+11
-     condicionamiento de (X^T @ D @ X): 3.76e+11        (con D=diag(0.25...))
-
---------------------------------------------
-Matriz sistema Ax = b ROLANN
-A = H @ H^T = X @ F^2 @ X^T             -> similar a la siguiente
-                                        -> ROLANN calcula su inversa analiticamente 1 vez
---------------------------------------------
-Hessiana de log-loss:
-H_lr = X^T @ D @ X
-
-Donde D:
-diag(p_i*(1-p_i)) = diag(p*q)           -> matrices de covarianza ponderadas
-
-La Hessiana describen la curvatura de la f. obj. (prob. optimización)
-Aunque se demuestre que la Hessiana de LR también es convexa
-
-Para el gradiente descendiente sea estable: 
-$\eta \le \frac{2}{\lam_{max}(Hessiana_{LR})}$
-
-$\lam_{max}(Hess_{LR}) \approx 494512247954619.25$
-
-Y el nº de iteraciones será proporcional al cond(Hessiana_lr)
-"""
-#%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-from plotters import plot_sns, plot_weights_comparison
-sns_params = {
-    'x': 'iter',        # Eje X
-    'y': 'diff_Z',      # Eje Y
-    'hue': 'lr',        # Distinto color para cada Learning Rate
-    'style': 'mode',    # Distinto trazo (sólido, punteado) para SEQ vs PAR
-    'size': 'p',        # Distinto tamaño
-    'linewidth': 1.5,   # etc
-}
-
-#%% [TESTING ROLANN & BCD ROLANN]
+#%% [TESTING ROLANN]
 from helpers import fit_rolann_models, score2label, predict_models
 from sklearn.metrics import accuracy_score
 
+# (He probado a usar X_train_bal pero los resultados son peores)
+
 # Fit
-models = fit_rolann_models(X_train, y_train, mode='binary', **rolann_params)
+print(f"ROLANN test params: {rolann_grid[-1]}")
+models = fit_rolann_models(X_train, y_train, mode='binary', **rolann_grid[-1])
 
 # Acc
 score_train = predict_models(X_train, models)
@@ -177,24 +143,28 @@ pred_test   = score2label(score_test, labels)
 acc_train   = accuracy_score(y_train, pred_train)
 acc_test    = accuracy_score(y_test, pred_test)
 
-print(f"Accuracy train: {100 * acc_train:.2f} %")   #  67.23%
-print(f"Accuracy test: {100 * acc_test:.2f} %")     #  69.04%
+print(f"Accuracy train: {100 * acc_train:.2f} %")   #  79.92%
+print(f"Accuracy test: {100 * acc_test:.2f} %")     #  80.09%
 
-#%% BCD
+
+#%% [TESTING BCDROLANN]
 from helpers import fit_bcd_models
 
 bcd_params = {
-                'p':        23,
-                'max_iter': 1000,
+                'p':        2,
+                'max_iter': 100,
                 'tol':      0,
-                'mode_bcd': 'parallel',
-                'lr':       0.2,
+                'mode_bcd': 'sequential',
+                'lr':       1,
+}
+test_data = {
                 'w_rolann': [mdl.w_ for mdl in models],
                 'test_data': (X_test.T, y_test)
              }
 
 # Fit
-coords, clients = fit_bcd_models(X_train, y_train, **(rolann_params|bcd_params), mode='binary')
+print(f"BCDROLANN test params: {rolann_grid[-1]|bcd_params}")
+coords, clients = fit_bcd_models(X_train, y_train, **(rolann_grid[-1]|bcd_params|test_data), mode='binary')
 
 # Acc
 score_bcd_train = predict_models(X_train.T, coords)
@@ -205,43 +175,45 @@ pred_bcd_test   = score2label(score_bcd_test, labels)
 acc_bcd_train   = accuracy_score(y_train, pred_bcd_train)
 acc_bcd_test    = accuracy_score(y_test, pred_bcd_test)
 
-print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 67.23%
-print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 69.04%
+print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 79.92%
+print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 89.09%
+df_bcd = coords[0].get_results()
 
-#%% [TESTING LR & VFL LR]
+#%% [TESTING LR]
 from helpers import fit_lr_models, score2label, predict_models
 from sklearn.metrics import accuracy_score
 
 lr_params = {
-    'lam': 1e-3,    # esto es C=1/lam... lam=2e4 CORREGIDO
+    'lam': 1,
     'tol': 0,
-    'max_iter': 250
+    'max_iter': 100
 }
 
 # Fit
-models_lr = fit_lr_models(X_train, y_train, mode='auto', **lr_params)
+print(f"LR test params: {lr_params}")
+models_lr = fit_lr_models(X_train, y_train.ravel(), mode='auto', **lr_params)
 
 # Acc
-score_lr_train = predict_models(X_train, models_lr)
-score_lr_test  = predict_models(X_test, models_lr)
+predict_models_lr = lambda X, mdls: np.hstack([mdl.predict_proba(X)[:, 1] for mdl in mdls])
+score_lr_train = predict_models_lr(X_train, models_lr)
+score_lr_test  = predict_models_lr(X_test, models_lr)
 pred_train  = score2label(score_lr_train, labels)
 pred_test   = score2label(score_lr_test, labels)
 
 acc_lr_train   = accuracy_score(y_train, pred_train)
 acc_lr_test    = accuracy_score(y_test, pred_test)
 
-print(f"Accuracy train: {100 * acc_lr_train:.2f} %")   #  67.09%
-print(f"Accuracy test: {100 * acc_lr_test:.2f} %")     #  68.42%
+print(f"Accuracy train: {100 * acc_lr_train:.2f} %")   #  81.16%
+print(f"Accuracy test: {100 * acc_lr_test:.2f} %")     #  81.20%
 
-
-#%% VFL LR
+#%% [TESTING LRVFL]
 from helpers import fit_lrvfl_models
 
 vfl_params = {
-    'p': 23,             # probado con otros 'p' -> min lr=0.001
+    'p': 2,             # probado con otros 'p' -> min lr=0.001
     'lr': 0.2,
-    'max_iter': 5000,   # override lr_params (meter > )
-    'method': 'bfgs',
+    'max_iter': 100,   # override lr_params (meter > )
+    'method': 'gd',
     'taylor': False,
     'w_lr': models_lr[0].w_,
     'test_data': (X_test.T, y_test)
@@ -261,6 +233,22 @@ acc_bcd_test    = accuracy_score(y_test, pred_bcd_test)
 
 print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 67.09%
 print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 68.42%
+
+df_lrvfl = coords[0].get_results()
+
+#%% [PLOTTERS]
+from plotters import plot_sns, plot_weights_comparison
+sns_params = {
+    'x': 'iter',        # Eje X
+    'y': 'diff_Z',      # Eje Y
+    'hue': 'lr',        # Distinto color para cada Learning Rate
+    'style': 'mode',    # Distinto trazo (sólido, punteado) para SEQ vs PAR
+    'size': 'p',        # Distinto tamaño
+    'linewidth': 1.5,   # etc
+    'palette': 'bright',
+}
+from helpers import compute_extra_results
+compute_extra_results(df_bcd, w_optim=None, X=X_train, y=y_train, lam=1, f_act='logs')
 
 #%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # %% [ESCENARIOS VFL]

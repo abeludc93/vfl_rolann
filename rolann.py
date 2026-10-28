@@ -17,7 +17,7 @@ def compute_loss_J_w(w, X, y, lam, f_act):
     # Cálculo de la función objetivo J(w) de ROLANN
     
     _, f_inv, f_der = load_act_fn(f_act)    # Cargamos f. act.
-    f_map = map_labels(f_act)               # Cargamos mapper y -> d
+    f_map, _ = map_labels(f_act)               # Cargamos mapper y -> d
     Xp = np.vstack([np.ones(len(X)), X.T])  # Xp traspuesto con bias incluido
     d = f_map(y.reshape(-1,1))              # Mapeamos para obtener target
     w = w.reshape(-1,1)                     # Aseguramos vector columna
