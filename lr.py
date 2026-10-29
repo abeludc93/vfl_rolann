@@ -43,6 +43,14 @@ def log_likelihood_taylor(ytrue, z):
 #=====================================
 #===[Funciones de pérdida/objetivo]===
 #=====================================
+def compute_loss(w, **kwargs):
+    # Wrapper for easy calling from `helpers.compute_extra_results`
+    kwargs_cpy = kwargs.copy() | {'w':w}
+    f_act = kwargs_cpy.pop('f_act')
+    if f_act == 'logs': loss = compute_loss_log(**kwargs_cpy)
+    else:               loss = compute_loss_linear(**kwargs_cpy)
+    return loss
+
 def compute_loss_log(w, X, y, lam, **kwargs):
     # Adapts `val_loss_log` to the same signature as `ROLANN.compute_loss_J_w` for easier comparisons.
 
@@ -209,7 +217,7 @@ class LRCoordinator:
 
         # [INIT HISTORY]
         print(f"Iniciando VFL {self.__class__.__name__} (modo={method}, taylor={taylor}, reg_bias={reg_bias}) con lr={lr}, tol={tol}, max_iter={max_iter}...")
-        self.hparams = {'max_iter': max_iter, 'tol': tol, 'lr': lr, 'mode': method, 'taylor': taylor, 'p': len(self.clients), 'init': init}
+        self.hparams = {'max_iter': max_iter, 'tol': tol, 'lr': lr, 'mode': method, 'taylor': taylor, 'p': len(self.clients), 'init': init, 'f_act': self.f_act}
         self.history = {'diff_w': [], 'diff_Z': [], 'diff_w_lr': [], 'loss':[], 'score_test': [], 'score_train': [], 'time': [], 'w_i': []}
         # [RESET]
         self.reset(hard=False)  # Reiniciamos pesos de clientes de 'fits' anteriores

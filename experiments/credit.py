@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
 """
+#!/usr/bin/env python3
 experiments/credit.py
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Experiment with the UCI ML - Default Credit Dataset.
@@ -145,7 +145,7 @@ acc_test    = accuracy_score(y_test, pred_test)
 
 print(f"Accuracy train: {100 * acc_train:.2f} %")   #  79.92%
 print(f"Accuracy test: {100 * acc_test:.2f} %")     #  80.09%
-
+w_rolann = models[0].w_
 
 #%% [TESTING BCDROLANN]
 from helpers import fit_bcd_models
@@ -205,6 +205,7 @@ acc_lr_test    = accuracy_score(y_test, pred_test)
 
 print(f"Accuracy train: {100 * acc_lr_train:.2f} %")   #  81.16%
 print(f"Accuracy test: {100 * acc_lr_test:.2f} %")     #  81.20%
+w_lr = models[0].w_
 
 #%% [TESTING LRVFL]
 from helpers import fit_lrvfl_models
@@ -233,8 +234,16 @@ acc_bcd_test    = accuracy_score(y_test, pred_bcd_test)
 
 print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 67.09%
 print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 68.42%
-
 df_lrvfl = coords[0].get_results()
+
+#%% [EXTRA RESULTS]
+# Columnas extras de resultados con optimalidad, costes comm, tiempo y loss.
+from helpers import compute_extra_results
+train_params = {'X': X_train, 'y': y_train}
+compute_extra_results(df_bcd, rolann=True, w_optim=w_rolann, 
+                      **train_params|rolann_grid[-1])
+compute_extra_results(df_lrvfl, rolann=False, w_optim=w_lr,
+                      **train_params|{'lam':lr_params['lam'], 'f_act': df_lrvfl.f_act.iloc[0]}) 
 
 #%% [PLOTTERS]
 from plotters import plot_sns, plot_weights_comparison
@@ -247,8 +256,8 @@ sns_params = {
     'linewidth': 1.5,   # etc
     'palette': 'bright',
 }
-from helpers import compute_extra_results
-compute_extra_results(df_bcd, w_optim=None, X=X_train, y=y_train, lam=1, f_act='logs')
+plot_sns(df_bcd, **sns_params|{'y':'opt_gap'})
+plot_sns(df_lrvfl, **sns_params|{'y':'opt_gap'})
 
 #%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # %% [ESCENARIOS VFL]

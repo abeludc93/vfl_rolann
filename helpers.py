@@ -21,7 +21,7 @@ from scipy import linalg as spla
 from sklearn.linear_model import LogisticRegression, Ridge
 # Application-modules
 from bcd import BCDClient, BCDCoordinator, BCDClient_par, BCDCoordinator_par, BCDClient_fhe, BCDCoordinator_fhe, BCDClient_sec, BCDCoordinator_sec
-from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_loss_log, compute_loss_linear
+from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_loss
 from rolann import ROLANN, compute_loss_J_w
 from activation_functions import load_act_fn, map_labels
 
@@ -643,14 +643,13 @@ def compute_extra_results(df, w_optim=None, rolann=True, **kwargs):
     # It also works with LR_VFL dataframe results via `rolann` flag.
     # `w_optim` represents the optimal (centralized) solution/weights.
 
-
-    # 0. Solución centralizada y su valor para la f. objetivo
-    f_act = kwargs.get('f_act', 'logs')
-    f_obj = compute_loss_J_w if rolann else (compute_loss_log if f_act == 'logs' else compute_loss_linear)
-    loss_w_optim = f_obj(w_optim, **kwargs) if w_optim is not None else None
+    # 0. Función. objetivo
+    f_obj = compute_loss_J_w if rolann else compute_loss
     # 1. F. objetivo ROLANN en cada iteracion - loss
-    df['loss'] = df.w_i.apply(func=f_obj, **kwargs)
+    if rolann:  df['loss'] = df.w_i.apply(func=f_obj, **kwargs)
     # 2. Suboptimalidad respecto a la solución centralizada - optgap
+    if w_optim is not None: loss_w_optim = f_obj(w_optim, **kwargs)
+    else:                   loss_w_optim = None    
     df['opt_gap'] = optimality_gap(df.loss, min_loss=loss_w_optim)
     # 3. Coste de comunicación - comm_costs
     df['comm_cost'] = communication_costs(df.iter, df.p, n=len(kwargs['X']), size_bytes=8, out='megabytes')
