@@ -539,7 +539,7 @@ class BCDCoordinator_sec(BCDCoordinator_par):
         )
         # Guardamos claves en clientes
         skeys, pkeys = zip(*keys)
-        ss = compute_pairwise_dh(skeys, pkeys)
+        ss = _compute_pairwise_dh(skeys, pkeys)
         for i, client in enumerate(self.clients):
             client.ss = ss[i]
         print(f"Setup - DH pairwise keys done!")
@@ -562,7 +562,7 @@ class BCDCoordinator_sec(BCDCoordinator_par):
 
 
 # Función auxiliar para SecureAgg: intercambio claves
-def compute_pairwise_dh(priv_keys, pub_keys):
+def _compute_pairwise_dh(priv_keys, pub_keys):
     n = len(priv_keys)
     ss = [[None]*n for _ in range(n)]
 

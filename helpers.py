@@ -715,6 +715,13 @@ def merge_df_gridsearch(exps, name=None):
     df = pd.concat(df_bcd)
     return df
 
+def decision_function(X, w, f_act):
+    # Para un input y pesos dados calculamos decision_function|predict_proba en LR|ROLANN.
+    f, _ , _ = load_act_fn(f_act)
+    Xp = np.vstack([np.ones([1, X.T.shape[1]]), X.T])
+    z = w.T @ Xp
+    y_pred = f(z).reshape([-1, 1])
+    return y_pred
 
 #=======================
 #===[(5) Convergence]===

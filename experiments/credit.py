@@ -238,12 +238,20 @@ df_lrvfl = coords[0].get_results()
 
 #%% [EXTRA RESULTS]
 # Columnas extras de resultados con optimalidad, costes comm, tiempo y loss.
-from helpers import compute_extra_results
+from helpers import compute_extra_results, decision_function
+from sklearn.metrics import brier_score_loss
+
 train_params = {'X': X_train, 'y': y_train}
 compute_extra_results(df_bcd, rolann=True, w_optim=w_rolann, 
                       **train_params|rolann_grid[-1])
 compute_extra_results(df_lrvfl, rolann=False, w_optim=w_lr,
                       **train_params|{'lam':lr_params['lam'], 'f_act': df_lrvfl.f_act.iloc[0]}) 
+
+df_bcd['brier_train']   = [brier_score_loss(y_train, decision_function(X_train, w, df_bcd.f_act.iloc[0]))
+                           for w in df_bcd.w_i]
+df_lrvfl['brier_train'] = [brier_score_loss(y_train, decision_function(X_train, w, df_lrvfl.f_act.iloc[0]))
+                           for w in df_lrvfl.w_i]
+
 
 #%% [PLOTTERS]
 from plotters import plot_sns, plot_weights_comparison
@@ -258,6 +266,14 @@ sns_params = {
 }
 plot_sns(df_bcd, **sns_params|{'y':'opt_gap'})
 plot_sns(df_lrvfl, **sns_params|{'y':'opt_gap'})
+plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'brier_train'})
+plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'brier_train'})
+
+#%% [TEST FEDTREE]
+from fedtree import FLClassifier
+
+
+
 
 #%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # %% [ESCENARIOS VFL]
