@@ -20,7 +20,7 @@ else:
     p = Path(__file__).parents[1]
 sys.path.insert(0, str(p))
 
-# %% [1. DATASET] - train/val/test split and class balance
+# %% [1. DATASET]
 from ucimlrepo import fetch_ucirepo
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -382,8 +382,9 @@ nn_opt_params = {
 nn_misc_params = {
     'shuffle': False,
     'device': 'cpu',
-    'verbose': True,
+    'verbose': False,
     'random_state': SEED,
+    'snapshot_frequency': 1,
 }
 
 model = SplitNNClassifier(**nn_vfl_params|nn_opt_params|nn_misc_params)
@@ -396,6 +397,7 @@ elapsed = time.perf_counter() - start
 
 #%%
 # Modelo info: batch_history_, epoch_history_, loss_history_
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 score_nn_train = model.predict_proba(X_train)[:,1]
 score_nn_test = model.predict_proba(X_test)[:,1]
@@ -413,10 +415,20 @@ print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
 
 #%%
-model.batch_history_
-model.epoch_history_
-model.loss_history_
+from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
 
+rounds = sorted(model.weight_snapshots_)
+results = []
+for r in rounds:
+    proba = model.predict_proba_at(X_test, round=r)
+    pred = model.classes_[proba.argmax(axis=1)]
+    results.append({
+        "round": r,
+        "accuracy": accuracy_score(y_test, pred),
+        "auc": roc_auc_score(y_test, proba[:, 1]),
+        "log_loss": log_loss(y_test, proba),
+    })
+metrics_history = pd.DataFrame(results)
 
 #%% ======================================================================
 # %% [ESCENARIOS VFL]

@@ -56,6 +56,7 @@ class SplitNN:
         validation_fraction: float = 0.1,
         restore_best_weights: bool = True,
         verbose: bool = True,
+        snapshot_frequency: int = 0,
     ) -> None:
         self.task = task
         self.n_parties = n_parties
@@ -78,6 +79,7 @@ class SplitNN:
         self.validation_fraction = validation_fraction
         self.restore_best_weights = restore_best_weights
         self.verbose = verbose
+        self.snapshot_frequency = snapshot_frequency
 
     @staticmethod
     def _validate_X(X: np.ndarray) -> np.ndarray:
@@ -234,6 +236,7 @@ class SplitNN:
         best_state = None
         epochs_without_improvement = 0
         self.n_iter_ = 0
+        snapshot_batch_iters = {round((len(loader) / self.snapshot_frequency) * i) for i in range(1, self.snapshot_frequency + 1)}
 
         for epoch in range(self.epochs):
             self.client_models_.train()
@@ -275,6 +278,7 @@ class SplitNN:
                     "estimated_backward_bytes": int(backward_bytes),
                     "estimated_communication_bytes": int(forward_bytes + backward_bytes),
                 })
+                if batch_index in snapshot_batch_iters: self.save_snapshot(self.n_iter_)
             epoch_loss = loss_sum / max(seen, 1)
             self.loss_history_.append(epoch_loss)
             val_loss = self._evaluate_loss(val_X, val_y) if val_X is not None else None  # ty: ignore[invalid-argument-type]
@@ -313,16 +317,25 @@ class SplitNN:
                         if self.verbose:
                             print(f"Early stopping at epoch {epoch + 1}; best epoch was {self.best_epoch_:d}.")
                         break
+
         self.n_epochs_ = len(self.loss_history_)
         self.batch_history_ = pd.DataFrame.from_records(batch_records)
         self.epoch_history_ = pd.DataFrame.from_records(epoch_records)
-        # Convenient default history for per-minibatch/round analyses.
-        self.history_ = self.batch_history_
+
         self.fit_time_s_ = time.perf_counter() - fit_start
         if self.early_stopping and self.restore_best_weights and best_state is not None:
             self.client_models_.load_state_dict(best_state["clients"])
             self.server_model_.load_state_dict(best_state["server"])
         return self
+
+    def save_snapshot(self, round):
+        self.weight_snapshots_[round] = {
+            "clients": [{k: v.detach().cpu().clone()
+                            for k, v in model.state_dict().items()}
+                        for model in self.client_models_],
+            "server":   {k: v.detach().cpu().clone()
+                            for k, v in self.server_model_.state_dict().items()}
+            }
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         if not hasattr(self, "server_model_"):
@@ -357,6 +370,41 @@ class SplitNN:
             outputs = [self._forward(tensor[i:i + self.batch_size]).cpu() for i in range(0, len(tensor), self.batch_size)]
             logits = torch.cat(outputs, dim=0)
             return torch.softmax(logits, dim=1).numpy()
+
+    def _forward_with_snapshot(self, X: torch.Tensor, snapshot: dict,) -> torch.Tensor:
+ 
+        representations = []
+        for model, state, sl in zip(self.client_models_, snapshot["clients"], self.feature_slices_,):
+            state = {k: v.to(X.device) for k, v in state.items()}
+            representations.append(torch.func.functional_call(model, state, (X[:, sl],),))
+
+        server_state = {k: v.to(X.device) for k, v in snapshot["server"].items()}
+        return torch.func.functional_call(self.server_model_, server_state, (torch.cat(representations, dim=1),),)
+
+    def predict_proba_at(self, X: np.ndarray, round: int,) -> np.ndarray:
+
+        if self.task != "classification":
+            raise AttributeError("predict_proba_at is available only for classification.")
+
+        if round not in self.weight_snapshots_:
+            raise ValueError(f"No weight snapshot available for round {round}.")
+
+        X = self._validate_X(X)
+
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(f"Expected {self.n_features_in_} features, got {X.shape[1]}.")
+
+        snapshot = self.weight_snapshots_[round]
+        self.client_models_.eval()
+        self.server_model_.eval()
+
+        with torch.no_grad():
+            tensor = torch.from_numpy(X).to(self.device_)
+            outputs = [self._forward_with_snapshot(tensor[i:i + self.batch_size], snapshot).cpu()
+                       for i in range(0, len(tensor), self.batch_size)]
+            logits = torch.cat(outputs, dim=0)
+            return torch.softmax(logits, dim=1).numpy()
+
 
 class SplitNNClassifier(SplitNN):
     """Convenience wrapper for classification."""
