@@ -239,7 +239,7 @@ df_lrvfl = coords[0].get_results()
 #%% [EXTRA RESULTS]
 # Columnas extras de resultados con optimalidad, costes comm, tiempo y loss.
 from helpers import compute_extra_results, decision_function
-from sklearn.metrics import brier_score_loss
+from sklearn.metrics import brier_score_loss, roc_auc_score
 
 train_params = {'X': X_train, 'y': y_train}
 compute_extra_results(df_bcd, rolann=True, w_optim=w_rolann, 
@@ -251,7 +251,10 @@ df_bcd['brier_train']   = [brier_score_loss(y_train, decision_function(X_train, 
                            for w in df_bcd.w_i]
 df_lrvfl['brier_train'] = [brier_score_loss(y_train, decision_function(X_train, w, df_lrvfl.f_act.iloc[0]))
                            for w in df_lrvfl.w_i]
-
+df_bcd['auc_train']   = [roc_auc_score(y_train, decision_function(X_train, w, df_bcd.f_act.iloc[0]))
+                           for w in df_bcd.w_i]
+df_lrvfl['auc_train'] = [roc_auc_score(y_train, decision_function(X_train, w, df_lrvfl.f_act.iloc[0]))
+                           for w in df_lrvfl.w_i]
 
 #%% [PLOTTERS]
 from plotters import plot_sns, plot_weights_comparison
@@ -268,14 +271,154 @@ plot_sns(df_bcd, **sns_params|{'y':'opt_gap'})
 plot_sns(df_lrvfl, **sns_params|{'y':'opt_gap'})
 plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'brier_train'})
 plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'brier_train'})
+plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'auc_train'})
+plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'auc_train'})
 
 #%% [TEST FEDTREE]
 from fedtree import FLClassifier
 
+# VFL params
+ft_vfl_params = {
+    'n_parties': 2,                     # num nodos
+    'partition': 1,                     # 0= cada nodo su Xi, 1=FedTree reparte equitativamente variables
+    'mode': "vertical",                 # horizontal|vertical
+    'partition_mode': "vertical",       # idem
+    'propose_split': "server",          # split_points, dejar en 'server' (default)
+    'merge_histogram': "server",        # idem
+    'privacy_tech':"none",              # SMPC: 'none'|'he'|'dp' (en caso de 'dp', meter privacy_budget)
+    'privacy_budget': 10,               # Para differential privacy
+    'seed': SEED,
+    #n_hori=2,                          # ?
+    #n_verti=2,                         
+    #alpha=100,                         
+    #variance=200,                      
+}
+# GBDT params
+ft_gbdt_params = {
+    'max_depth': 6,                     # profundidad árboles
+    'n_trees': 40,                      # num árboles
+    'lambda_ft':1,                      # L2 reg
+    'learning_rate':1,                  # learning rate
+    'objective':"binary:logistic",      # f.obj: 'reg:linear'|'reg:logistic'|'binary:logistic'
+    'verbose': 1,                       # 0|1|2               
+    #gamma=1,                           # ?
+    #min_child_weight=1,                
+    #column_sampling_rate=1,
+    #n_parallel_trees=1,
+    #num_class=1,
+    #n_device=1,
+    #max_num_bin=255,
+    #ins_bagging_fraction=1.0,
+    #reorder_label=0,
+    #bagging=0,
+    #constant_h = 0.0,
+    #tree_method="auto"
+}
+model = FLClassifier(**ft_gbdt_params|ft_vfl_params)
+
+# Entrenamos y capturamos salida
+from wurlitzer import pipes
+with pipes() as (out, _):
+  model.fit(X_train, y_train)
+log_ft = out.read()
+print(log_ft)
+
+import re
+auc_scores_ft = [float(val) for val in re.findall(r"AUC = ([0-9.]+)", log_ft)]
+total_time_ft = [float(val) for val in re.findall(r"training time = ([0-9.]+)s", log_ft)][0]
+iters_ft = np.arange(start=6, stop=246, step=6) # D, D*T, D
+
+"""
+# Si se ejecuta como un script de Python (no como notebook), debería de bastar esto
+from contextlib import redirect_stdout
+from io import StringIO
+f = StringIO()
+with redirect_stdout(f):
+    model.fit(X_train, y_train)
+log_ft = f.getvalue()
+print(f"LOG: {log_ft}")
+"""
+score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
+score_ft_test  = model.predict_proba(X_test)[:,1]   # clase positiva
+
+acc_ft_train = accuracy_score(y_train, (score_ft_train > .5).astype(int))
+auc_ft_train = roc_auc_score(y_train, score_ft_train) 
+acc_ft_test = accuracy_score(y_test, (score_ft_test > .5).astype(int))
+auc_ft_test = roc_auc_score(y_test, score_ft_test) 
+
+print(f"Accuracy train: {100 * acc_ft_train:.2f} %")   # 89.95 %
+print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
+
+print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
+print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
+
+#%% [TEST SPLITNN]
+from splitnn import SplitNNClassifier
+
+nn_vfl_params = {
+    'n_parties':            2,          # int
+    'hidden_dims_clients':  (4,2),      # tuple
+    'hidden_dims_server':   (6,),       # tuple
+    'activation':           'relu',     # 'relu'|'tanh'|'gelu'
+
+    'epochs':               25,         # int
+    'batch_size':           64,         # int
+    
+    'validation_fraction':  0.0,        # float
+    'restore_best_weights': True,       # bool
+    'early_stopping':       False,      # bool
+    'patience':             10,         # int   (if ↑ True)
+    'min_delta':            0.0,        # float (if ↑ True)
+}
+
+nn_opt_params = {
+    'learning_rate':        0.05,       # float
+    'optimizer':            'sgd',      # 'sgd'|'adam'|'adamw'
+    'momentum':             0.0,        # float
+    'dropout':              0.0,        # float (0<=dropout<1)
+    'weight_decay':         0.0,        # float
+}
+
+nn_misc_params = {
+    'shuffle': False,
+    'device': 'cpu',
+    'verbose': True,
+    'random_state': SEED,
+}
+
+model = SplitNNClassifier(**nn_vfl_params|nn_opt_params|nn_misc_params)
+
+#%% 
+import time
+start = time.perf_counter()
+model.fit(X_train, y_train)
+elapsed = time.perf_counter() - start
+
+#%%
+# Modelo info: batch_history_, epoch_history_, loss_history_
+
+score_nn_train = model.predict_proba(X_train)[:,1]
+score_nn_test = model.predict_proba(X_test)[:,1]
+
+acc_nn_train = accuracy_score(y_train, model.predict(X_train))
+acc_nn_test = accuracy_score(y_test, model.predict(X_test))
+
+auc_nn_train = roc_auc_score(y_train, score_nn_train)
+auc_nn_test = roc_auc_score(y_test, score_nn_test)
+
+print(f"Accuracy train: {100 * acc_nn_train:.2f} %")   # 89.95 %
+print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 79.11 %
+
+print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
+print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
+
+#%%
+model.batch_history_
+model.epoch_history_
+model.loss_history_
 
 
-
-#%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#%% ======================================================================
 # %% [ESCENARIOS VFL]
 from helpers import run_grid_search, run_grid_search_lr, merge_df_gridsearch, compute_extra_results
 df_all_lst = []

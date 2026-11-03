@@ -7,6 +7,9 @@
 # Cache Python
 __pycache__/
 *.py[cod]
+*.egg-info
+build/
+dist/
 # Entornos virtuales
 .venv/
 env/
@@ -16,4 +19,6 @@ datasets/
 cache/
 docs/
 results/
-baselines/
+tests/
+# Misc
+*.so

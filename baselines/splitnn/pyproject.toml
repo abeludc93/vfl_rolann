@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "splitnn-vfl"
+version = "0.0.1"
+description = "SplitNN baseline for VFL experiments"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "torch",
+    "torchvision"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
