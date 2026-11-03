@@ -361,7 +361,7 @@ nn_vfl_params = {
     'hidden_dims_server':   (6,),       # tuple
     'activation':           'relu',     # 'relu'|'tanh'|'gelu'
 
-    'epochs':               25,         # int
+    'epochs':               100,         # int
     'batch_size':           64,         # int
     
     'validation_fraction':  0.0,        # float
@@ -420,15 +420,24 @@ from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
 rounds = sorted(model.weight_snapshots_)
 results = []
 for r in rounds:
-    proba = model.predict_proba_at(X_test, round=r)
-    pred = model.classes_[proba.argmax(axis=1)]
+    proba_test = model.predict_proba_at(X_test, round=r)
+    proba_train = model.predict_proba_at(X_train, round=r)
+    pred_test = model.classes_[proba_test.argmax(axis=1)]
+    pred_train = model.classes_[proba_train.argmax(axis=1)]
+
     results.append({
         "round": r,
-        "accuracy": accuracy_score(y_test, pred),
-        "auc": roc_auc_score(y_test, proba[:, 1]),
-        "log_loss": log_loss(y_test, proba),
+        "acc_test": accuracy_score(y_test, pred_test),
+        "auc_test": roc_auc_score(y_test, proba_test[:, 1]),
+        "logloss_test": log_loss(y_test, proba_test),
+        "acc_train": accuracy_score(y_train, pred_train),
+        "auc_train": roc_auc_score(y_train, proba_train[:, 1]),
+        "logloss_train": log_loss(y_train, proba_train),
     })
 metrics_history = pd.DataFrame(results)
+metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'), ('auc_test', 'auc_train'), ('logloss_test', 'logloss_train')],
+                                 layout=(1,3), figsize=(20,8))
+metrics_history.loc[:,['logloss_test', 'logloss_train']].plot(logy=True)
 
 #%% ======================================================================
 # %% [ESCENARIOS VFL]
