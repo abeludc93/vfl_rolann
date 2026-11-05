@@ -39,53 +39,29 @@ class SplitNN(BaseEstimator):
         hidden_dims_clients:    Sequence[int]  = (32, 64),
         hidden_dims_server:     Sequence[int]  = (64,),
         activation:             ActivationName = "relu",
-        
         # FIT
         epochs:                 int = 25,
         batch_size:             int = 64,
         dropout:                float = 0.0,
-
         # OPTIM
         optimizer:              OptimizerName = "sgd",
         learning_rate:          float = 0.05,
         momentum:               float = 0.0,
         weight_decay:           float = 0.0,
-
         # TRAIN STOP
         early_stopping:         bool  = False,
         patience:               int   = 10,
         min_delta:              float = 0.0,
         validation_fraction:    float = 0.1,
-
         # MISC
         shuffle:                bool = True,
         random_state:           int  = 42,
         device:                 str  = "cpu",
         verbose:                bool = True,
-        snapshot_frequency:     int  = 0,
-
+        snapshot_frequency:     int  = 0
     ) -> None:
-        self.task                   = task
-        self.n_parties              = n_parties
-        self.hidden_dims_clients    = hidden_dims_clients
-        self.hidden_dims_server     = hidden_dims_server
-        self.activation             = activation
-        self.epochs                 = epochs
-        self.batch_size             = batch_size
-        self.dropout                = dropout
-        self.optimizer              = optimizer
-        self.learning_rate          = learning_rate
-        self.momentum               = momentum
-        self.weight_decay           = weight_decay
-        self.early_stopping         = early_stopping
-        self.patience               = patience
-        self.min_delta              = min_delta
-        self.validation_fraction    = validation_fraction
-        self.shuffle                = shuffle
-        self.random_state           = random_state
-        self.device                 = device
-        self.verbose                = verbose
-        self.snapshot_frequency     = snapshot_frequency
+        for key, value in locals().items():
+            if key != 'self':   setattr(self, key, value)
 
     @staticmethod
     def _validate_X(X: np.ndarray) -> np.ndarray:
@@ -441,13 +417,71 @@ class SplitNN(BaseEstimator):
             return torch.softmax(logits, dim=1).numpy()
 
 
-class SplitNNClassifier(SplitNN):
-    """Wrapper for classification."""
-    def __init__(self, **kwargs):
-        super().__init__(task="classification", **kwargs)
+class SplitNNClassifier(SplitNN, ClassifierMixin):
+    """Wrapper for classification. Explicit init params for sklearn support."""
+    def __init__(
+        self,
+        # NN
+        n_parties:              int = 2,
+        hidden_dims_clients:    Sequence[int]  = (32, 64),
+        hidden_dims_server:     Sequence[int]  = (64,),
+        activation:             ActivationName = "relu",
+        # FIT
+        epochs:                 int = 25,
+        batch_size:             int = 64,
+        dropout:                float = 0.0,
+        # OPTIM
+        optimizer:              OptimizerName = "sgd",
+        learning_rate:          float = 0.05,
+        momentum:               float = 0.0,
+        weight_decay:           float = 0.0,
+        # TRAIN STOP
+        early_stopping:         bool  = False,
+        patience:               int   = 10,
+        min_delta:              float = 0.0,
+        validation_fraction:    float = 0.1,
+        # MISC
+        shuffle:                bool = True,
+        random_state:           int  = 42,
+        device:                 str  = "cpu",
+        verbose:                bool = True,
+        snapshot_frequency:     int  = 0
+    ) -> None:
+        params = locals()
+        params.pop('self', None)
+        super().__init__(task="classification", **params)
 
 
-class SplitNNRegressor(SplitNN):
-    """Wrapper for regression."""
-    def __init__(self, **kwargs):
-        super().__init__(task="regression", **kwargs)
+class SplitNNRegressor(SplitNN, RegressorMixin):
+    """Wrapper for regression. Explicit init params for sklearn support."""
+    def __init__(
+        self,
+        # NN
+        n_parties:              int = 2,
+        hidden_dims_clients:    Sequence[int]  = (32, 64),
+        hidden_dims_server:     Sequence[int]  = (64,),
+        activation:             ActivationName = "relu",
+        # FIT
+        epochs:                 int = 25,
+        batch_size:             int = 64,
+        dropout:                float = 0.0,
+        # OPTIM
+        optimizer:              OptimizerName = "sgd",
+        learning_rate:          float = 0.05,
+        momentum:               float = 0.0,
+        weight_decay:           float = 0.0,
+        # TRAIN STOP
+        early_stopping:         bool  = False,
+        patience:               int   = 10,
+        min_delta:              float = 0.0,
+        validation_fraction:    float = 0.1,
+        # MISC
+        shuffle:                bool = True,
+        random_state:           int  = 42,
+        device:                 str  = "cpu",
+        verbose:                bool = True,
+        snapshot_frequency:     int  = 0
+    ) -> None:
+        params = locals()
+        params.pop('self', None)        
+        super().__init__(task="regression", **params)
