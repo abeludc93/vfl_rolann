@@ -397,7 +397,7 @@ def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     lr          = params['lr']
     method      = params['method']
     taylor      = params['taylor']
-    w_lr        = params['w_lr']
+    w_lr        = params['w_lr']    # ojo, no es lista de vect columnas si no array 2D
     Xtest, ytest= params['test_data']
     init        = params.get('init', 'zero')
     reg_bias    = params.get('reg_bias', False)
@@ -411,9 +411,9 @@ def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     # de la sol. centralizada (LR) y las filas de Xtest (atributos)
     if type(p) == dict: 
         Xtest = np.vstack(split_vfl_X(Xtest, p))
-        for i, w_r in enumerate(w_lr):
-            w_r = arrange_weights_by_split(w_r, p)
-            w_lr[i] = w_r
+        for i, w_r in enumerate(w_lr.T):
+            w_r = arrange_weights_by_split(w_r.reshape(-1, 1), p)
+            w_lr[:, i] = w_r
 
     # Preparamos targets 'y' en caso de clasificación OvR
     if mode == 'ovr':
@@ -434,7 +434,7 @@ def fit_lrvfl_models(X_train, y_train, mode='ovr', **params):
     Client, Coord = (RidgeClient, RidgeCoordinator) if mode == 'regression' else (LRClient, LRCoordinator)
     lst_clients = [Client(id=i+1, X=X_lst_T[i], lam=lam)
                     for i in range(num_nodos)]
-    lst_coords = [Coord(clients=lst_clients, y=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_lr=w_lr[n])
+    lst_coords = [Coord(clients=lst_clients, y=y_target[:,n], test_data=(Xtest, y_test[:,n]), w_lr=w_lr[:, n])
                     for n in range(num_outputs)]
 
     # Fit

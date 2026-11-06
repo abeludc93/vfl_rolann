@@ -209,7 +209,7 @@ class LRCoordinator:
         self.clients    = clients               # list of clients
         self.y          = y.reshape([-1, 1])    # real/desired outputs (no multi-output, 1D data)
         self.test_data  = test_data             # test dataset
-        self.w_lr       = w_lr                  # solution from centralized LogisticRegression
+        self.w_lr       = w_lr                  # optim. solution from centralized LogisticRegression
         self.f_act      = 'logs'                # act. function ('logs' only)
 
     def fit(self, max_iter=20, tol=1e-3, lr=0.75, method='gd', taylor=False, init='zero', reg_bias=False):

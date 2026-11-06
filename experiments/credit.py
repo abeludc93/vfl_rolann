@@ -187,7 +187,7 @@ bcd_params = {
                 'lr':       1,
 }
 test_data = {
-                'w_rolann': [mdl.w_ for mdl in models],
+                'w_rolann': [mdl.w_ for mdl in models], # envolvemos en una lista cada output
                 'test_data': (X_test.T, y_test)
              }
 
@@ -214,7 +214,7 @@ df_bcd = coords[0].get_results()
 
 #%% [TESTING LR]
 from helpers import fit_lr_models, score2label, predict_models
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 lr_params = {
     'lam': 1,
@@ -246,6 +246,7 @@ w_lr = models_lr[0].w_
 
 #%% [TESTING LRVFL]
 from helpers import fit_lrvfl_models
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 vfl_params = {
     'p': 2,                             # probado con otros 'p' -> min lr=0.001
@@ -253,14 +254,14 @@ vfl_params = {
     'max_iter': 100,                    # override lr_params (meter > )
     'method': 'gd',
     'taylor': False,
-    'w_lr': models_lr[0].w_,
+    'w_lr': w_lr,                       # ojo, aqui es un 2D ndarray y no una lista
     'test_data': (X_test.T, y_test)
 }
 
 # Fit
 coords, clients = fit_lrvfl_models(X_train, y_train, **(lr_params|vfl_params), mode='binary')
 
-# Acc
+# Metricas
 score_lrvfl_train = predict_models(X_train.T, coords)
 score_lrvfl_test  = predict_models(X_test.T, coords)
 pred_lrvfl_train  = score2label(score_lrvfl_train, labels)
@@ -319,13 +320,9 @@ sns_params = {
 }
 
 #%% [PLOTS BCD & LRVFL]
+dfs = pd.concat([df_bcd.assign(name='bcd'), df_lrvfl.assign(name='lrvfl')])
 
-plot_sns(df_bcd, **sns_params|{'y':'opt_gap'})
-plot_sns(df_lrvfl, **sns_params|{'y':'opt_gap'})
-plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'auc_test'})
-plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'auc_test'})
-plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'auc_train'})
-plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'auc_train'})
+plot_sns(dfs, plot_log=False, **sns_params|{'y': 'auc_train', 'hue': 'name', 'style': 'lr'})
 
 #%% [TEST FEDTREE]
 from fedtree import FLClassifier
