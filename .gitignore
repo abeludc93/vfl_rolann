@@ -19,6 +19,6 @@ datasets/
 cache/
 docs/
 results/
-tests/
 # Misc
 *.so
+test/

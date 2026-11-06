@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/test_par.py
+tests/test_implementations.py
 ~~~~~~~~~~~~~~~~~~~~~~~~
-Showcase of the BCD_ROLANN parallel implementation with
-the `joblib` library for parallelized computations.
+Showcase of the BCDROLANN implementations:
+'normal': plain, non-parallelized impl. (w/o `joblib`)
+'par': parallelized impl. (`joblib`) 
+'sec': paralellized SMPC with SecureAgg impl
+'fhe': parallelized SMPC with CKKS FHE scheme impl. (`tenseal`)
 """
 #%% [0. SYSPATH]
 # To avoid using relative imports (requires setting up modules)
@@ -21,7 +24,6 @@ sys.path.insert(0, str(p))
 from sklearn.datasets import load_digits
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-import numpy as np
 import pandas as pd
 
 # Clasificacion
@@ -55,7 +57,7 @@ bcd_grid = {
     'lr':       [0.25],                         # learning rates
     'tol':      [0],                            # tolerance
     'max_iter': [100],                          # max iterations
-    'bcd_impl': ['normal', 'par', 'sec', 'fhe'],# BCD ROLANN implementations
+    'bcd_impl': ['normal', 'par', 'sec', 'fhe'],# BCD ROLANN implementations (parallel, SEC, FHE)
     'ctx':      [context],                      # TenSeal context for fhe impl
 
 }   # TOTAL: 4*4 = 16 RUNS
