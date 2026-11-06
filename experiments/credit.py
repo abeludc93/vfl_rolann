@@ -109,11 +109,36 @@ y_train_bal = ytrainbal.to_numpy()
 y_val       = yval.to_numpy()
 y_test      = ytest.to_numpy()
 
+#%% [DUMMY MODELS]
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import roc_auc_score, accuracy_score
+
+# 'prior':      returns the most frequent class label
+# 'stratified': randomly samples vectors from a distribution of the prior probabilities
+model = DummyClassifier(strategy='stratified', random_state=SEED)
+model.fit(X_train, y_train)
+
+# Metrics
+score_train = model.predict_proba(X_train)
+score_test  = model.predict_proba(X_test)
+pred_train  = model.predict(X_train)
+pred_test   = model.predict(X_test)
+
+acc_train   = accuracy_score(y_train, pred_train)
+acc_test    = accuracy_score(y_test, pred_test)
+auc_train   = roc_auc_score(y_train, score_train[:, 1])
+auc_test    = roc_auc_score(y_test, score_test[:, 1])
+
+print(f"Accuracy train: {100 * acc_train:.2f} %")   # 77.88 %
+print(f"Accuracy test: {100 * acc_test:.2f} %")     # 77.87 %
+print(f"AUC train: {100 * auc_train:.2f} %")        # 50    %
+print(f"AUC test: {100 * auc_test:.2f} %")          # 50    %
+
 # %% [ROLANN HIPERPARAMS]
 from sklearn.model_selection import ParameterGrid
 f_act = ['tanhip','logs']
 lam = [1e-3, 1e-2, 1e-1, 1]
-rolann_params = {'f_act':f_act, 'lam': lam}
+rolann_params = {'f_act': f_act, 'lam': lam}
 rolann_grid = list(ParameterGrid(rolann_params))
 
 # %% [CONDICIONAMIENTO]
@@ -126,7 +151,7 @@ for params in rolann_grid:
 
 #%% [TESTING ROLANN]
 from helpers import fit_rolann_models, score2label, predict_models
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 # (He probado a usar X_train_bal pero los resultados son peores)
 
@@ -134,7 +159,7 @@ from sklearn.metrics import accuracy_score
 print(f"ROLANN test params: {rolann_grid[-1]}")
 models = fit_rolann_models(X_train, y_train, mode='binary', **rolann_grid[-1])
 
-# Acc
+# Metrics
 score_train = predict_models(X_train, models)
 score_test  = predict_models(X_test, models)
 pred_train  = score2label(score_train, labels)
@@ -142,9 +167,13 @@ pred_test   = score2label(score_test, labels)
 
 acc_train   = accuracy_score(y_train, pred_train)
 acc_test    = accuracy_score(y_test, pred_test)
+auc_train   = roc_auc_score(y_train, score_train)
+auc_test    = roc_auc_score(y_test, score_test)
 
-print(f"Accuracy train: {100 * acc_train:.2f} %")   #  79.92%
-print(f"Accuracy test: {100 * acc_test:.2f} %")     #  80.09%
+print(f"Accuracy train: {100 * acc_train:.2f} %")   #  79.92 %
+print(f"Accuracy test: {100 * acc_test:.2f} %")     #  80.09 %
+print(f"AUC train: {100 * auc_train:.2f} %")        #  72.05 %
+print(f"AUC test: {100 * auc_test:.2f} %")          #  71.26 %
 w_rolann = models[0].w_
 
 #%% [TESTING BCDROLANN]
@@ -174,9 +203,13 @@ pred_bcd_test   = score2label(score_bcd_test, labels)
 
 acc_bcd_train   = accuracy_score(y_train, pred_bcd_train)
 acc_bcd_test    = accuracy_score(y_test, pred_bcd_test)
+auc_bcd_train   = roc_auc_score(y_train, score_bcd_train)
+auc_bcd_test    = roc_auc_score(y_test, score_bcd_test)
 
-print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 79.92%
-print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 89.09%
+print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 79.92 %
+print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 89.09 %
+print(f"AUC train: {100 * auc_bcd_train:.2f} %")        # 72.05 %
+print(f"AUC test: {100 * auc_bcd_test:.2f} %")          # 71.26 %
 df_bcd = coords[0].get_results()
 
 #%% [TESTING LR]
@@ -202,18 +235,22 @@ pred_test   = score2label(score_lr_test, labels)
 
 acc_lr_train   = accuracy_score(y_train, pred_train)
 acc_lr_test    = accuracy_score(y_test, pred_test)
+auc_lr_train   = roc_auc_score(y_train, score_lr_train)
+auc_lr_test    = roc_auc_score(y_test, score_lr_test)
 
-print(f"Accuracy train: {100 * acc_lr_train:.2f} %")   #  81.16%
-print(f"Accuracy test: {100 * acc_lr_test:.2f} %")     #  81.20%
-w_lr = models[0].w_
+print(f"Accuracy train: {100 * acc_lr_train:.2f} %")    # 81.16 %
+print(f"Accuracy test: {100 * acc_lr_test:.2f} %")      # 81.20 %
+print(f"AUC train: {100 * auc_lr_train:.2f} %")         # 72.62 %
+print(f"AUC test: {100 * auc_lr_test:.2f} %")           # 71.99 %
+w_lr = models_lr[0].w_
 
 #%% [TESTING LRVFL]
 from helpers import fit_lrvfl_models
 
 vfl_params = {
-    'p': 2,             # probado con otros 'p' -> min lr=0.001
+    'p': 2,                             # probado con otros 'p' -> min lr=0.001
     'lr': 0.2,
-    'max_iter': 100,   # override lr_params (meter > )
+    'max_iter': 100,                    # override lr_params (meter > )
     'method': 'gd',
     'taylor': False,
     'w_lr': models_lr[0].w_,
@@ -224,36 +261,49 @@ vfl_params = {
 coords, clients = fit_lrvfl_models(X_train, y_train, **(lr_params|vfl_params), mode='binary')
 
 # Acc
-score_bcd_train = predict_models(X_train.T, coords)
-score_bcd_test  = predict_models(X_test.T, coords)
-pred_bcd_train  = score2label(score_bcd_train, labels)
-pred_bcd_test   = score2label(score_bcd_test, labels)
+score_lrvfl_train = predict_models(X_train.T, coords)
+score_lrvfl_test  = predict_models(X_test.T, coords)
+pred_lrvfl_train  = score2label(score_lrvfl_train, labels)
+pred_lrvfl_test   = score2label(score_lrvfl_test, labels)
 
-acc_bcd_train   = accuracy_score(y_train, pred_bcd_train)
-acc_bcd_test    = accuracy_score(y_test, pred_bcd_test)
+acc_lrvfl_train   = accuracy_score(y_train, pred_lrvfl_train)
+acc_lrvfl_test    = accuracy_score(y_test, pred_lrvfl_test)
+auc_lrvfl_train   = roc_auc_score(y_train, score_lrvfl_train)
+auc_lrvfl_test    = roc_auc_score(y_test, score_lrvfl_test)
 
-print(f"Accuracy train: {100 * acc_bcd_train:.2f} %")   # 67.09%
-print(f"Accuracy test: {100 * acc_bcd_test:.2f} %")     # 68.42%
+print(f"Accuracy train: {100 * acc_lrvfl_train:.2f} %") # 80.81 %
+print(f"Accuracy test: {100 * acc_lrvfl_test:.2f} %")   # 80.84 %
+print(f"AUC train: {100 * auc_lrvfl_train:.2f} %")      # 72.35 %
+print(f"AUC test: {100 * auc_lrvfl_test:.2f} %")        # 71.73 %
 df_lrvfl = coords[0].get_results()
 
 #%% [EXTRA RESULTS]
 # Columnas extras de resultados con optimalidad, costes comm, tiempo y loss.
 from helpers import compute_extra_results, decision_function
-from sklearn.metrics import brier_score_loss, roc_auc_score
+from sklearn.metrics import roc_auc_score
 
 train_params = {'X': X_train, 'y': y_train}
-compute_extra_results(df_bcd, rolann=True, w_optim=w_rolann, 
-                      **train_params|rolann_grid[-1])
-compute_extra_results(df_lrvfl, rolann=False, w_optim=w_lr,
-                      **train_params|{'lam':lr_params['lam'], 'f_act': df_lrvfl.f_act.iloc[0]}) 
+# Extra params -> f_act, lam
+f_act_bcd, lam_bcd =  rolann_grid[-1].values()
+compute_extra_results(df_bcd,
+                      rolann=True,
+                      w_optim=w_rolann, 
+                      **train_params|{'lam':lam_bcd, 'f_act': f_act_bcd})
+# Extra params -> f_act, lam
+f_act_lrvfl, lam_lrvfl = 'logs', lr_params['lam']
+compute_extra_results(df_lrvfl,
+                      rolann=False,
+                      w_optim=w_lr,
+                      **train_params|{'lam':lam_lrvfl, 'f_act': lam_lrvfl}) 
 
-df_bcd['brier_train']   = [brier_score_loss(y_train, decision_function(X_train, w, df_bcd.f_act.iloc[0]))
-                           for w in df_bcd.w_i]
-df_lrvfl['brier_train'] = [brier_score_loss(y_train, decision_function(X_train, w, df_lrvfl.f_act.iloc[0]))
+df_bcd['auc_train'] = [roc_auc_score(y_train, decision_function(X_train, w, f_act_bcd))
+                       for w in df_bcd.w_i]
+df_bcd['auc_test']  = [roc_auc_score(y_test, decision_function(X_test, w, f_act_bcd))
+                       for w in df_bcd.w_i]
+
+df_lrvfl['auc_train']   = [roc_auc_score(y_train, decision_function(X_train, w, f_act_lrvfl))
                            for w in df_lrvfl.w_i]
-df_bcd['auc_train']   = [roc_auc_score(y_train, decision_function(X_train, w, df_bcd.f_act.iloc[0]))
-                           for w in df_bcd.w_i]
-df_lrvfl['auc_train'] = [roc_auc_score(y_train, decision_function(X_train, w, df_lrvfl.f_act.iloc[0]))
+df_lrvfl['auc_test']    = [roc_auc_score(y_test, decision_function(X_test, w, f_act_lrvfl))
                            for w in df_lrvfl.w_i]
 
 #%% [PLOTTERS]
@@ -267,10 +317,13 @@ sns_params = {
     'linewidth': 1.5,   # etc
     'palette': 'bright',
 }
+
+#%% [PLOTS BCD & LRVFL]
+
 plot_sns(df_bcd, **sns_params|{'y':'opt_gap'})
 plot_sns(df_lrvfl, **sns_params|{'y':'opt_gap'})
-plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'brier_train'})
-plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'brier_train'})
+plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'auc_test'})
+plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'auc_test'})
 plot_sns(df_bcd, plot_log=False, **sns_params|{'y': 'auc_train'})
 plot_sns(df_lrvfl, plot_log=False, **sns_params|{'y': 'auc_train'})
 
@@ -352,6 +405,11 @@ print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
 
+#%% [TEST GSCV FEDTREE]
+# GridSearch FEDTREE
+
+
+
 #%% [TEST SPLITNN]
 from splitnn import SplitNNClassifier
 
@@ -364,9 +422,8 @@ nn_vfl_params = {
     'epochs':               100,         # int
     'batch_size':           64,         # int
     
-    'validation_fraction':  0.0,        # float
-    'restore_best_weights': True,       # bool
     'early_stopping':       False,      # bool
+    'validation_fraction':  0.0,        # float (if ↑ True)
     'patience':             10,         # int   (if ↑ True)
     'min_delta':            0.0,        # float (if ↑ True)
 }
@@ -387,18 +444,13 @@ nn_misc_params = {
     'snapshot_frequency': 1,
 }
 
+# Model info: batch_history_, epoch_history_
+from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
+
 model = SplitNNClassifier(**nn_vfl_params|nn_opt_params|nn_misc_params)
-
-#%% 
-import time
-start = time.perf_counter()
 model.fit(X_train, y_train)
-elapsed = time.perf_counter() - start
 
-#%%
-# Modelo info: batch_history_, epoch_history_, loss_history_
-from sklearn.metrics import roc_auc_score, accuracy_score
-
+# Metricas
 score_nn_train = model.predict_proba(X_train)[:,1]
 score_nn_test = model.predict_proba(X_test)[:,1]
 
@@ -414,19 +466,18 @@ print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
 
-#%%
-from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
+# Evolucion metricas
 
-rounds = sorted(model.weight_snapshots_)
+iter = sorted(model.weight_snapshots_)
 results = []
-for r in rounds:
-    proba_test = model.predict_proba_at(X_test, round=r)
-    proba_train = model.predict_proba_at(X_train, round=r)
+for i in iter:
+    proba_test = model.predict_proba_at(X_test, iter=i)
+    proba_train = model.predict_proba_at(X_train, iter=i)
     pred_test = model.classes_[proba_test.argmax(axis=1)]
     pred_train = model.classes_[proba_train.argmax(axis=1)]
 
     results.append({
-        "round": r,
+        "iter": i,
         "acc_test": accuracy_score(y_test, pred_test),
         "auc_test": roc_auc_score(y_test, proba_test[:, 1]),
         "logloss_test": log_loss(y_test, proba_test),
@@ -435,9 +486,12 @@ for r in rounds:
         "logloss_train": log_loss(y_train, proba_train),
     })
 metrics_history = pd.DataFrame(results)
-metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'), ('auc_test', 'auc_train'), ('logloss_test', 'logloss_train')],
+metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
+                                           ('auc_test', 'auc_train'),
+                                           ('logloss_test', 'logloss_train')],
                                  layout=(1,3), figsize=(20,8))
-metrics_history.loc[:,['logloss_test', 'logloss_train']].plot(logy=True)
+#%% [TEST GSCV SPLITNN]
+# GridSearch SplitNN
 
 #%% ======================================================================
 # %% [ESCENARIOS VFL]

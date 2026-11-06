@@ -25,9 +25,8 @@ from lr import LRClient, LRCoordinator, RidgeClient, RidgeCoordinator, compute_l
 from rolann import ROLANN, compute_loss_J_w
 from activation_functions import load_act_fn, map_labels
 
-
+#%% 1: Datasets
 #====================
-#===[(1) Datasets]===
 #====================
 
 def load_dataset(path):
@@ -70,9 +69,8 @@ def balance_train_data(X_train, y_train, random_state=1):
     
     return X_train_balanced, y_train_balanced
 
-
+#%% 2. Splits
 #==================
-#===[(2) Splits]===
 #==================
 
 def split_vfl_X(X, p):
@@ -177,9 +175,8 @@ def get_column_indexes(df, cols):
     indexes = df.columns.get_indexer(cols)
     return indexes
 
-
+#%% 3. Models
 #==================
-#===[(3) Models]===
 #==================
 
 def fit_rolann_models(X_train, y_train, mode='ovr', **params):
@@ -542,8 +539,8 @@ def get_bcd_class(impl='normal', ctx=None):
         return impl_dict[impl]  # Cliente, Coordinador (:class, :class)
 
 
+#%% 4. Results
 #===================
-#===[(4) Results]===
 #===================
 
 def score2label(scores, labels=None, f_act='logs'):

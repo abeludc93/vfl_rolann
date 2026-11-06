@@ -149,9 +149,9 @@ class SplitNN(BaseEstimator):
             raise ValueError("y contains NaN or infinite values.")
         return X, y
 
-    def _save_snapshot(self, round: int) -> None:
+    def _save_snapshot(self, iter: int) -> None:
         # Aux. function to save weights of the splitNN-VFL MLP into weight_snapshots_ dict.
-        self.weight_snapshots_[round] = {
+        self.weight_snapshots_[iter] = {
             "clients": [{k: v.detach().cpu().clone()
                             for k, v in model.state_dict().items()}
                         for model in self.client_models_],
@@ -268,7 +268,7 @@ class SplitNN(BaseEstimator):
                 backward_bytes = forward_bytes = rep_values * np.dtype(np.float32).itemsize
                 # Update batch record history
                 batch_records.append({
-                    "round":        self.n_iter_,
+                    "iter":         self.n_iter_,
                     "epoch":        epoch + 1,
                     "batch":        batch_index,
                     "batch_size":   batch_n,
@@ -391,20 +391,20 @@ class SplitNN(BaseEstimator):
         server_state = {k: v.to(X.device) for k, v in snapshot["server"].items()}
         return torch.func.functional_call(self.server_model_, server_state, (torch.cat(representations, dim=1),))
 
-    def predict_proba_at(self, X: np.ndarray, round: int) -> np.ndarray:
-        # Same as predict_proba but with the saved weights for the given round
+    def predict_proba_at(self, X: np.ndarray, iter: int) -> np.ndarray:
+        # Same as predict_proba but with the saved weights for the given iter
 
         # Check and validate X
         if self.task != "classification":
             raise AttributeError("predict_proba_at is available only for classification.")
-        if round not in self.weight_snapshots_:
-            raise ValueError(f"No weight snapshot available for round {round}.")
+        if iter not in self.weight_snapshots_:
+            raise ValueError(f"No weight snapshot available for iter {iter}.")
         X = self._validate_X(X)
         if X.shape[1] != self.n_features_in_:
             raise ValueError(f"Expected {self.n_features_in_} features, got {X.shape[1]}.")
 
         # Enable evaluation mode and restore saved weights
-        snapshot = self.weight_snapshots_[round]
+        snapshot = self.weight_snapshots_[iter]
         self.client_models_.eval()
         self.server_model_.eval()
 
@@ -447,8 +447,9 @@ class SplitNNClassifier(SplitNN, ClassifierMixin):
         verbose:                bool = True,
         snapshot_frequency:     int  = 0
     ) -> None:
-        params = locals()
+        params = locals().copy()
         params.pop('self', None)
+        params.pop('__class__', None)
         super().__init__(task="classification", **params)
 
 
@@ -482,6 +483,7 @@ class SplitNNRegressor(SplitNN, RegressorMixin):
         verbose:                bool = True,
         snapshot_frequency:     int  = 0
     ) -> None:
-        params = locals()
-        params.pop('self', None)        
+        params = locals().copy()
+        params.pop('self', None)
+        params.pop('__class__', None)       
         super().__init__(task="regression", **params)
