@@ -417,7 +417,7 @@ class SplitNN(BaseEstimator):
             return torch.softmax(logits, dim=1).numpy()
 
 
-class SplitNNClassifier(SplitNN, ClassifierMixin):
+class SplitNNClassifier(ClassifierMixin, SplitNN):
     """Wrapper for classification. Explicit init params for sklearn support."""
     def __init__(
         self,
@@ -453,7 +453,7 @@ class SplitNNClassifier(SplitNN, ClassifierMixin):
         super().__init__(task="classification", **params)
 
 
-class SplitNNRegressor(SplitNN, RegressorMixin):
+class SplitNNRegressor(RegressorMixin, SplitNN):
     """Wrapper for regression. Explicit init params for sklearn support."""
     def __init__(
         self,
