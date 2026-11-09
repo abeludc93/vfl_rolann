@@ -350,7 +350,8 @@ class FLModel(fedtreeBase):
             print("mean test RMSE:%.6f+%.6f" %(statistics.mean(test_score_list), statistics.stdev(test_score_list)))
         return self.eval_res
 
-class FLClassifier(FLModel, fedtreeClassifierBase):
+# Abel: mixins should be on the left for proper MRO
+class FLClassifier(fedtreeClassifierBase, FLModel):
     _impl = 'classifier'
 
     def __init__(self, n_parties=2, partition=1, alpha=100, n_hori=2, n_verti=2, mode="horizontal",
@@ -368,7 +369,14 @@ class FLClassifier(FLModel, fedtreeClassifierBase):
                          max_num_bin=max_num_bin, seed=seed, ins_bagging_fraction=ins_bagging_fraction,
                          reorder_label=reorder_label, bagging=bagging, constant_h=constant_h, tree_method=tree_method)
 
-class FLRegressor(FLModel, fedtreeRegressorBase):
+    # Abel: classifier must set 'classes_' attribute for proper sklearn support
+    def fit(self, X, y, groups=None):
+        super().fit(X, y, groups=groups)
+        self.classes_ = np.unique(y)
+        return self
+
+# Abel: mixins should be on the left for proper MRO
+class FLRegressor(fedtreeRegressorBase, FLModel):
     _impl = 'regressor'
     def __init__(self, n_parties=2, partition=1, alpha=100, n_hori=2, n_verti=2, mode="horizontal",
                  partition_mode="horizontal", privacy_tech="none", propose_split="server", merge_histogram="server",

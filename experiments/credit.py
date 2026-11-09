@@ -320,9 +320,11 @@ sns_params = {
 }
 
 #%% [PLOTS BCD & LRVFL]
-dfs = pd.concat([df_bcd.assign(name='bcd'), df_lrvfl.assign(name='lrvfl')])
+dfs = pd.concat([df_bcd.assign(name='bcd').rename(columns={'diff_w_rolann': 'diff_w_optim'}),
+                 df_lrvfl.assign(name='lrvfl').rename(columns={'diff_w_lr': 'diff_w_optim'})])
 
 plot_sns(dfs, plot_log=False, **sns_params|{'y': 'auc_train', 'hue': 'name', 'style': 'lr'})
+plot_sns(dfs, plot_log=True,  **sns_params|{'y': 'diff_w_optim', 'hue': 'name', 'style': 'lr'})
 
 #%% [TEST FEDTREE]
 from fedtree import FLClassifier
@@ -336,7 +338,7 @@ ft_vfl_params = {
     'propose_split': "server",          # split_points, dejar en 'server' (default)
     'merge_histogram': "server",        # idem
     'privacy_tech':"none",              # SMPC: 'none'|'he'|'dp' (en caso de 'dp', meter privacy_budget)
-    'privacy_budget': 10,               # Para differential privacy
+    'privacy_budget': 10,               # ↑ differential privacy
     'seed': SEED,
     #n_hori=2,                          # ?
     #n_verti=2,                         
@@ -374,9 +376,10 @@ log_ft = out.read()
 print(log_ft)
 
 import re
-auc_scores_ft = [float(val) for val in re.findall(r"AUC = ([0-9.]+)", log_ft)]
+auc_scores_ft = [float(val) for val in re.findall(r"AUC = ([0-9.]+)", log_ft)]  # RMSE para reg
 total_time_ft = [float(val) for val in re.findall(r"training time = ([0-9.]+)s", log_ft)][0]
-iters_ft = np.arange(start=6, stop=246, step=6) # D, D*T, D
+depth, ntrees = ft_gbdt_params['max_depth'], ft_gbdt_params['n_trees']
+iters_ft = np.arange(start=depth, stop=depth * ntrees + depth, step=depth) # D, D*T+D, D
 
 """
 # Si se ejecuta como un script de Python (no como notebook), debería de bastar esto
@@ -388,6 +391,8 @@ with redirect_stdout(f):
 log_ft = f.getvalue()
 print(f"LOG: {log_ft}")
 """
+from sklearn.metrics import accuracy_score, roc_auc_score
+
 score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
 score_ft_test  = model.predict_proba(X_test)[:,1]   # clase positiva
 
@@ -402,10 +407,33 @@ print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
 
+df_ft = pd.DataFrame({'iter': iters_ft, 'auc_train': auc_scores_ft, 'total_time': total_time_ft})
+
 #%% [TEST GSCV FEDTREE]
 # GridSearch FEDTREE
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
 
+Xtrainval = np.concatenate([X_train, X_val])
+ytrainval = np.concatenate([y_train, y_val])
 
+# -1: entrenamiento, 0: validación
+test_fold = np.concat([np.full(len(X_train), -1), np.zeros(len(X_val), dtype=int)])
+cv_val = PredefinedSplit(test_fold)
+
+# GSCV: n_jobs: 1 para evitar problemas con implementación paralelizada en C++
+#       refit: False para entrenar el mejor modelo más adelante
+#       cv: PredefinedSplit para fijar (X_val, y_val) 
+#       scoring: 'roc_auc'|'neg_root_mean_squared_error'
+params = {'max_depth':[2, 4], 'n_trees': [10, 20]}
+gscv_ft = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, error_score='raise', refit=False)
+gscv_ft.fit(Xtrainval, ytrainval)
+df_gscv_ft = pd.DataFrame(gscv_ft.cv_results_)
+print(f"Mejores params FT: {gscv_ft.best_params_}")
+
+# Re-entrenar mejor modelo: posible mejora.. integrar captura outputs y get_results dentro
+from sklearn.base import clone
+best_model = clone(model).set_params(**gscv_ft.best_params_)
+best_model.fit(X_train, y_train)
 
 #%% [TEST SPLITNN]
 from splitnn import SplitNNClassifier
@@ -463,8 +491,7 @@ print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
 
-# Evolucion metricas
-
+# Evolucion metricas: (TODO: también podría meterlo dentro)
 iter = sorted(model.weight_snapshots_)
 results = []
 for i in iter:
@@ -489,6 +516,22 @@ metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
                                  layout=(1,3), figsize=(20,8))
 #%% [TEST GSCV SPLITNN]
 # GridSearch SplitNN
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
+
+Xtrainval = np.concatenate([X_train, X_val])
+ytrainval = np.concatenate([y_train, y_val])
+
+# -1: entrenamiento, 0: validación
+test_fold = np.concat([np.full(len(X_train), -1), np.zeros(len(X_val), dtype=int)])
+cv_val = PredefinedSplit(test_fold)
+
+# GSCV: n_jobs: 1 para evitar problemas con implementación paralelizada en C++
+#       cv: PredefinedSplit para
+params = {'learning_rate': [.05, .5], 'optimizer': ['adam']}
+gscv_nn = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, error_score='raise')
+gscv_nn.fit(Xtrainval, ytrainval)
+df_gscv_nn = pd.DataFrame(gscv_nn.cv_results_)
+print(f"Mejores params FT: {gscv_nn.best_params_}")
 
 #%% ======================================================================
 # %% [ESCENARIOS VFL]
