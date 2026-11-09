@@ -409,6 +409,20 @@ print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
 
 df_ft = pd.DataFrame({'iter': iters_ft, 'auc_train': auc_scores_ft, 'total_time': total_time_ft})
 
+#%% TEST EVOLUCION: funciona mejor que la captura de output por que no hay redondeo!
+n_trees_original = model.n_trees
+try:
+    auc_history = []
+    for n in range(1, n_trees_original + 1):
+        model.n_trees = n
+        y_score = model.predict_proba(X_train)[:, 1]
+        auc_history.append(roc_auc_score(y_train, y_score))
+    auc_history = np.array(auc_history)
+finally:
+    model.n_trees = n_trees_original
+
+
+
 #%% [TEST GSCV FEDTREE]
 # GridSearch FEDTREE
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
@@ -430,7 +444,7 @@ gscv_ft.fit(Xtrainval, ytrainval)
 df_gscv_ft = pd.DataFrame(gscv_ft.cv_results_)
 print(f"Mejores params FT: {gscv_ft.best_params_}")
 
-# Re-entrenar mejor modelo: posible mejora.. integrar captura outputs y get_results dentro
+# Re-entrenar mejor modelo: (TODO) integrar captura outputs y get_results dentro
 from sklearn.base import clone
 best_model = clone(model).set_params(**gscv_ft.best_params_)
 best_model.fit(X_train, y_train)
@@ -464,7 +478,7 @@ nn_opt_params = {
 nn_misc_params = {
     'shuffle': False,
     'device': 'cpu',
-    'verbose': False,
+    'verbose': True,
     'random_state': SEED,
     'snapshot_frequency': 1,
 }
@@ -514,6 +528,7 @@ metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
                                            ('auc_test', 'auc_train'),
                                            ('logloss_test', 'logloss_train')],
                                  layout=(1,3), figsize=(20,8))
+
 #%% [TEST GSCV SPLITNN]
 # GridSearch SplitNN
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
