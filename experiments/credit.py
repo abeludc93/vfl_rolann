@@ -302,10 +302,10 @@ df_bcd['auc_train'] = [roc_auc_score(y_train, decision_function(X_train, w, f_ac
 df_bcd['auc_test']  = [roc_auc_score(y_test, decision_function(X_test, w, f_act_bcd))
                        for w in df_bcd.w_i]
 
-df_lrvfl['auc_train']   = [roc_auc_score(y_train, decision_function(X_train, w, f_act_lrvfl))
-                           for w in df_lrvfl.w_i]
-df_lrvfl['auc_test']    = [roc_auc_score(y_test, decision_function(X_test, w, f_act_lrvfl))
-                           for w in df_lrvfl.w_i]
+df_lrvfl['auc_train'] = [roc_auc_score(y_train, decision_function(X_train, w, f_act_lrvfl))
+                         for w in df_lrvfl.w_i]
+df_lrvfl['auc_test']  = [roc_auc_score(y_test, decision_function(X_test, w, f_act_lrvfl))
+                         for w in df_lrvfl.w_i]
 
 #%% [PLOTTERS]
 from plotters import plot_sns, plot_weights_comparison
@@ -347,8 +347,8 @@ ft_vfl_params = {
 }
 # GBDT params
 ft_gbdt_params = {
-    'max_depth': 6,                     # profundidad árboles
-    'n_trees': 40,                      # num árboles
+    'max_depth': 4,                     # profundidad árboles
+    'n_trees':  10,                     # num árboles
     'lambda_ft':1,                      # L2 reg
     'learning_rate':1,                  # learning rate
     'objective':"binary:logistic",      # f.obj: 'reg:linear'|'reg:logistic'|'binary:logistic'
@@ -359,7 +359,7 @@ ft_gbdt_params = {
     #n_parallel_trees=1,
     #num_class=1,
     #n_device=1,
-    #max_num_bin=255,
+    'max_num_bin': 36,
     #ins_bagging_fraction=1.0,
     #reorder_label=0,
     #bagging=0,
@@ -368,29 +368,7 @@ ft_gbdt_params = {
 }
 model = FLClassifier(**ft_gbdt_params|ft_vfl_params)
 
-# Entrenamos y capturamos salida (vebose=1)
-from wurlitzer import pipes
-with pipes() as (out, _):
-  model.fit(X_train, y_train)
-log_ft = out.read()
-print(log_ft)
-
-import re
-auc_scores_ft = [float(val) for val in re.findall(r"AUC = ([0-9.]+)", log_ft)]  # RMSE para reg
-total_time_ft = [float(val) for val in re.findall(r"training time = ([0-9.]+)s", log_ft)][0]
-depth, ntrees = ft_gbdt_params['max_depth'], ft_gbdt_params['n_trees']
-iters_ft = np.arange(start=depth, stop=depth * ntrees + depth, step=depth) # D, D*T+D, D
-
-"""
-# Si se ejecuta como un script de Python (no como notebook), debería de bastar esto
-from contextlib import redirect_stdout
-from io import StringIO
-f = StringIO()
-with redirect_stdout(f):
-    model.fit(X_train, y_train)
-log_ft = f.getvalue()
-print(f"LOG: {log_ft}")
-"""
+# Entrenamos
 from sklearn.metrics import accuracy_score, roc_auc_score
 model.fit(X_train, y_train)
 score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
@@ -407,19 +385,10 @@ print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
 
-df_ft = pd.DataFrame({'iter': iters_ft, 'auc_train': auc_scores_ft, 'total_time': total_time_ft})
-
-#%% TEST EVOLUCION: funciona mejor que la captura de output por que no hay redondeo!
-n_trees_original = model.n_trees
-try:
-    auc_history = []
-    for n in range(1, n_trees_original + 1):
-        model.n_trees = n
-        y_score = model.predict_proba(X_train)[:, 1]
-        auc_history.append(roc_auc_score(y_train, y_score))
-    auc_history = np.array(auc_history)
-finally:
-    model.n_trees = n_trees_original
+# EVOLUCION METRICAS:
+df_ft = model.get_results(train_Xy=(X_train, y_train), test_Xy=(X_test, y_test))
+df_ft.iloc[:, 4:].plot(subplots=[('acc_test', 'acc_train'), ('auc_test', 'auc_train')],
+                       layout=(1,2), figsize=(20,8))
 
 #%% [TEST GSCV FEDTREE]
 # GridSearch FEDTREE
@@ -437,38 +406,13 @@ cv_val = PredefinedSplit(test_fold)
 #       cv: PredefinedSplit para fijar (X_val, y_val) 
 #       scoring: 'roc_auc'|'neg_root_mean_squared_error'
 params = {'max_depth':[2, 4], 'n_trees': [10, 20]}
-gscv_ft = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, error_score='raise', refit=False)
+gscv_ft = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, error_score='raise')
 gscv_ft.fit(Xtrainval, ytrainval)
+
+# Mejor modelo
+best_model = gscv_ft.best_estimator_
 df_gscv_ft = pd.DataFrame(gscv_ft.cv_results_)
 print(f"Mejores params FT: {gscv_ft.best_params_}")
-
-# Re-entrenar mejor modelo: si refit=False
-from sklearn.base import clone
-best_model = clone(model).set_params(**gscv_ft.best_params_)
-best_model.fit(X_train, y_train)
-
-#%% RESULTADOS EVOLUCION
-from sklearn.metrics import accuracy_score, roc_auc_score
-
-model.fit(X_train, y_train)
-score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
-score_ft_test  = model.predict_proba(X_test)[:,1]   # clase positiva
-
-acc_ft_train = accuracy_score(y_train, (score_ft_train > .5).astype(int))
-auc_ft_train = roc_auc_score(y_train, score_ft_train) 
-acc_ft_test = accuracy_score(y_test, (score_ft_test > .5).astype(int))
-auc_ft_test = roc_auc_score(y_test, score_ft_test) 
-
-print(f"Accuracy train: {100 * acc_ft_train:.2f} %")   # 89.95 %
-print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
-
-print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
-print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
-
-df_ft = model.get_results(train_Xy=(X_train, y_train), test_Xy=(X_test, y_test))
-df_ft.iloc[:, 3:].plot(subplots=[('acc_test', 'acc_train'),
-                                 ('auc_test', 'auc_train')],
-                       layout=(1,2), figsize=(20,8))
 
 #%% [TEST SPLITNN]
 from splitnn import SplitNNClassifier
@@ -479,17 +423,17 @@ nn_vfl_params = {
     'hidden_dims_server':   (6,),       # tuple
     'activation':           'relu',     # 'relu'|'tanh'|'gelu'
 
-    'epochs':               100,         # int
+    'epochs':               100,        # int
     'batch_size':           64,         # int
     
     'early_stopping':       False,      # bool
     'validation_fraction':  0.0,        # float (if ↑ True)
     'patience':             10,         # int   (if ↑ True)
-    'min_delta':            0.0,        # float (if ↑ True)
+    'min_delta':            0,        # float (if ↑ True)
 }
 
 nn_opt_params = {
-    'learning_rate':        0.05,       # float
+    'learning_rate':        .05,       # float
     'optimizer':            'sgd',      # 'sgd'|'adam'|'adamw'
     'momentum':             0.0,        # float
     'dropout':              0.0,        # float (0<=dropout<1)
@@ -520,43 +464,18 @@ acc_nn_test = accuracy_score(y_test, model.predict(X_test))
 auc_nn_train = roc_auc_score(y_train, score_nn_train)
 auc_nn_test = roc_auc_score(y_test, score_nn_test)
 
-print(f"Accuracy train: {100 * acc_nn_train:.2f} %")   # 89.95 %
-print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 79.11 %
+print(f"Accuracy train: {100 * acc_nn_train:.2f} %")   # 82.14 %
+print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 81.93 %
 
-print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
-print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
+print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 77.93 %
+print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 77.61 %
 
-#%% Evolucion metricas: (TODO: también podría meterlo dentro)
-iter = sorted(model.weight_snapshots_)
-results = []
-for i in iter:
-    proba_test = model.predict_proba_at(X_test, iter=i)
-    proba_train = model.predict_proba_at(X_train, iter=i)
-    pred_test = model.classes_[proba_test.argmax(axis=1)]
-    pred_train = model.classes_[proba_train.argmax(axis=1)]
-
-    results.append({
-        "iter": i,
-        "acc_test": accuracy_score(y_test, pred_test),
-        "auc_test": roc_auc_score(y_test, proba_test[:, 1]),
-        "logloss_test": log_loss(y_test, proba_test),
-        "acc_train": accuracy_score(y_train, pred_train),
-        "auc_train": roc_auc_score(y_train, proba_train[:, 1]),
-        "logloss_train": log_loss(y_train, proba_train),
-    })
-metrics_history = pd.DataFrame(results)
-metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
-                                           ('auc_test', 'auc_train'),
-                                           ('logloss_test', 'logloss_train')],
-                                 layout=(1,3), figsize=(20,8))
-
-#%%
+# Evolucion metricas:
 df_nn = model.get_results(train_Xy=(X_train, y_train), test_Xy=(X_test, y_test))
-
 df_nn.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
-                                           ('auc_test', 'auc_train'),
-                                           ('logloss_test', 'logloss_train')],
-                                 layout=(1,3), figsize=(20,8))
+                                 ('auc_test', 'auc_train'),
+                                 ('logloss_test', 'logloss_train')],
+                       layout=(1,3), figsize=(20,8))
 
 #%% [TEST GSCV SPLITNN]
 # GridSearch SplitNN
@@ -574,13 +493,13 @@ cv_val = PredefinedSplit(test_fold)
 params = {'learning_rate': [.05, .5], 'optimizer': ['adam']}
 gscv_nn = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, error_score='raise')
 gscv_nn.fit(Xtrainval, ytrainval)
+
+# Mejor modelo
+best_model = gscv_nn.best_estimator_
 df_gscv_nn = pd.DataFrame(gscv_nn.cv_results_)
 print(f"Mejores params FT: {gscv_nn.best_params_}")
 
-#%% EVOLUCION METRICAS DENTRO
-
-
-#%% ======================================================================
+#%% ===================================================================================
 # %% [ESCENARIOS VFL]
 from helpers import run_grid_search, run_grid_search_lr, merge_df_gridsearch, compute_extra_results
 df_all_lst = []
@@ -643,8 +562,17 @@ df_all_lst.extend([df, df_lr])
 #%% (2) - Split balanceado - BCD ROLANN
 m, m_min = X_train.shape[1], 4
 num_groups = 4
-p_bal = np.geomspace(m, m_min, num_groups, dtype=int).tolist()
-param_grid['p'] = p_bal # 29 atributos, 4 minimo, 5 grupos para geomspace => [29, 14, 7, 4]
+# BCD params
+param_grid  = {
+    'p': [2, 4, 8, 12],                             # Split
+    'mode_bcd': ['sequential'],         # Modos
+    'lr': [1],                                      # Learning rates modo paralelo
+    'tol': [0],                                     # Tolerancia
+    'max_iter': [1000],                             # Max iteraciones
+    'heur': [False]                                  # Heuristica
+}
+#p_bal = np.geomspace(m, m_min, num_groups, dtype=int).tolist()
+#param_grid['p'] = p_bal # 29 atributos, 4 minimo, 5 grupos para geomspace => [29, 14, 7, 4]
 print(param_grid)
 
 # Lanzamos experimento

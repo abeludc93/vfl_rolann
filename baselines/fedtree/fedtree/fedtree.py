@@ -106,10 +106,11 @@ class FLModel(fedtreeBase):
         X, y = check_X_y(X, y, dtype=np.float64, order='C', accept_sparse='csr')
         fit = self._sparse_fit
 
-        # Abel: fit time
+        # Abel: fit time, extra params
         t_ini = perf_counter()
         fit(X, y, groups=groups)
         self.fit_time_ = perf_counter() - t_ini
+        self.n_samples_, self.n_features_ = X.shape
 
         return self
 
@@ -364,8 +365,29 @@ class FLModel(fedtreeBase):
         round_ft = list(range(1, ntrees + 1))
         iters_ft = np.arange(start=depth, stop=depth * ntrees + depth, step=depth) # D, D*T+D, D
         time_ft  = self.fit_time_
-        df_ft    = pd.DataFrame({'round': round_ft, 'iter': iters_ft, 'total_time': time_ft})
+        commcost = self._comm_costs()
+        df_ft    = pd.DataFrame({'round':round_ft, 'iter':iters_ft, 'total_time':time_ft, 'comm_cost':commcost})
         return df_ft.assign(name=name) if name else df_ft
+
+    # Abel: estimate comm costs
+    def _comm_costs(self):
+        check_is_fitted(self)
+        if not 2 <= self.n_parties <= self.n_features_:
+            raise ValueError("At least two clients/parties w/ one feature each!")
+
+        n_passive = self.n_parties - 1
+        n_passive_features = n_passive * (self.n_features_ // self.n_parties)
+
+        bytes_per_value = np.dtype(np.float32).itemsize # 4
+        # gradients/hessian
+        gh_bytes_per_tree = 2 * bytes_per_value * self.n_samples_ * n_passive   
+        hist_bytes_per_node = 2 * bytes_per_value * self.max_num_bin * n_passive_features
+        nodes_per_tree = 2**self.max_depth - 1
+
+        comm_bytes_tree = gh_bytes_per_tree + hist_bytes_per_node * nodes_per_tree
+        results = pd.Series(comm_bytes_tree, index=range(self.n_trees)).cumsum()
+        return results
+    
 
 # Abel: mixins should be on the left for proper MRO
 class FLClassifier(fedtreeClassifierBase, FLModel):

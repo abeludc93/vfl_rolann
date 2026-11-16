@@ -593,11 +593,12 @@ def predict_models(X, models):
 
     return scores
 
-def communication_costs(k, p, n, size_bytes=8, c=1, out='bytes'):
+def communication_costs(k, p, n, size_bytes=4, c=1, out='bytes'):
     # Computes communication costs of BCD_ROLANN|LR_VFL for a given
     # set of 'k' iters, 'p' clients, 'n' vector size of residuals 
     # or predictions exchanged and 'c' outputs.
     # Returns sum in out='bytes'|'megabytes'|'gigabytes'
+    # size_bytes → 4 bytes for float32, 8 for float64 (np.dtypes(float32).itemsize)
 
     iters = np.arange(1, k+1) if isinstance(k, int) else k
     comm_costs = iters * p * n * size_bytes * c

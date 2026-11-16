@@ -276,7 +276,7 @@ class SplitNN(BaseEstimator):
                     "samples_seen": samples_seen,
                     "step_time":    step_elapsed,
                     "elapsed_time": time.perf_counter() - fit_start,
-                    "estimated_communication_bytes": int(forward_bytes + backward_bytes),
+                    "comm_cost":    int(forward_bytes + backward_bytes),
                 })
                 
             # Update auxiliary variables
