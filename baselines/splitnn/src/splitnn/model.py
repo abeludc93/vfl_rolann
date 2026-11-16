@@ -416,6 +416,75 @@ class SplitNN(BaseEstimator):
             logits = torch.cat(outputs, dim=0)
             return torch.softmax(logits, dim=1).numpy()
 
+    def predict_at(self, X: np.ndarray, iter: int) -> np.ndarray:
+        # Same as predict but with the saved weights for the given iter
+
+        # Check and validate X
+        if iter not in self.weight_snapshots_:
+            raise ValueError(f"No weight snapshot available for iter {iter}.")
+        X = self._validate_X(X)
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(f"Expected {self.n_features_in_} features, got {X.shape[1]}.")
+
+        # Enable evaluation mode and restore saved weights
+        snapshot = self.weight_snapshots_[iter]
+        self.client_models_.eval()
+        self.server_model_.eval()
+
+        # Forward pass and softmax
+        with torch.no_grad():
+            tensor = torch.from_numpy(X).to(self.device_)
+            outputs = [self._forward_with_snapshot(tensor[i:i + self.batch_size], snapshot).cpu()
+                       for i in range(0, len(tensor), self.batch_size)]
+            predictions = torch.cat(outputs, dim=0).numpy()
+            # Return net input for regression or class of the predicted max value for binary classif.
+            if self.task == "classification":
+                return self.classes_[predictions.argmax(axis=1)]
+            return predictions.reshape(-1)
+
+
+    def get_results(self, train_Xy, test_Xy, name=None):
+        # Returns dataframe with the evolution of different score metrics
+        if self.snapshot_frequency == 0:
+            raise AttributeError("No evolution results are possible w/ nil `snapshot_frequency`!")
+        if not self.weight_snapshots_:
+            raise ValueError("Empty weight dictionary. Train the model first!")
+
+        Xtrain, ytrain  = train_Xy
+        Xtest, ytest    = test_Xy
+        iter = sorted(self.weight_snapshots_)
+        results = []
+        if self.task == 'classification':
+            from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
+            for i in iter:
+                proba_train = self.predict_proba_at(Xtrain, iter=i)
+                proba_test  = self.predict_proba_at(Xtest, iter=i)
+                pred_train  = self.classes_[proba_train.argmax(axis=1)]
+                pred_test   = self.classes_[proba_test.argmax(axis=1)]
+                results.append({
+                    "iter": i,
+                    "acc_train": accuracy_score(ytrain, pred_train),
+                    "auc_train": roc_auc_score(ytrain, proba_train[:, 1]),
+                    "logloss_train": log_loss(ytrain, proba_train),
+                    "acc_test": accuracy_score(ytest, pred_test),
+                    "auc_test": roc_auc_score(ytest, proba_test[:, 1]),
+                    "logloss_test": log_loss(ytest, proba_test),
+                })
+        else:
+            from sklearn.metrics import root_mean_squared_error, r2_score
+            for i in iter:
+                pred_train = self.predict_at(Xtrain, iter=1)
+                pred_test  = self.predict_at(Xtest,  iter=i)
+                results.append({
+                    "iter": i,
+                    "rmse_train": root_mean_squared_error(ytrain, pred_train),
+                    "r2_train": r2_score(ytrain, pred_train),
+                    "rmse_test": root_mean_squared_error(ytest, pred_test),
+                    "r2_test": r2_score(ytest, pred_test),
+                })
+
+        metrics_history = pd.DataFrame(results)
+        return metrics_history.assign(name=name) if name else metrics_history
 
 class SplitNNClassifier(ClassifierMixin, SplitNN):
     """Wrapper for classification. Explicit init params for sklearn support."""

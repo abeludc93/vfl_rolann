@@ -526,7 +526,7 @@ print(f"Accuracy test: {100 * acc_nn_test:.2f} %")     # 79.11 %
 print(f"AUC train: {100 * auc_nn_train:.2f} %")   # 94.36 %
 print(f"AUC test: {100 * auc_nn_test:.2f} %")     # 73.90 %
 
-# Evolucion metricas: (TODO: también podría meterlo dentro)
+#%% Evolucion metricas: (TODO: también podría meterlo dentro)
 iter = sorted(model.weight_snapshots_)
 results = []
 for i in iter:
@@ -550,6 +550,14 @@ metrics_history.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
                                            ('logloss_test', 'logloss_train')],
                                  layout=(1,3), figsize=(20,8))
 
+#%%
+df_nn = model.get_results(train_Xy=(X_train, y_train), test_Xy=(X_test, y_test))
+
+df_nn.iloc[:, 1:].plot(subplots=[('acc_test', 'acc_train'),
+                                           ('auc_test', 'auc_train'),
+                                           ('logloss_test', 'logloss_train')],
+                                 layout=(1,3), figsize=(20,8))
+
 #%% [TEST GSCV SPLITNN]
 # GridSearch SplitNN
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
@@ -568,6 +576,9 @@ gscv_nn = GridSearchCV(model, params, scoring='roc_auc', cv=cv_val, n_jobs=1, er
 gscv_nn.fit(Xtrainval, ytrainval)
 df_gscv_nn = pd.DataFrame(gscv_nn.cv_results_)
 print(f"Mejores params FT: {gscv_nn.best_params_}")
+
+#%% EVOLUCION METRICAS DENTRO
+
 
 #%% ======================================================================
 # %% [ESCENARIOS VFL]

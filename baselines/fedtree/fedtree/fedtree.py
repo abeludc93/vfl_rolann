@@ -1,6 +1,6 @@
 from sklearn.base import BaseEstimator
 from sklearn.base import RegressorMixin, ClassifierMixin
-from sklearn.metrics import mean_squared_error, accuracy_score, roc_auc_score, r2_score
+from sklearn.metrics import mean_squared_error, accuracy_score, roc_auc_score, r2_score, root_mean_squared_error
 
 from time import perf_counter   # Abel: time fit process
 import pandas as pd             # Abel: results dataframe
@@ -415,23 +415,32 @@ class FLClassifier(fedtreeClassifierBase, FLModel):
         return history
 
     # Abel:
-    def get_results(self, train_Xy, test_Xy, name=None):
+    def get_results(self, train_Xy, test_Xy, proba=True, name=None):
         Xtrain, ytrain  = train_Xy
         Xtest, ytest    = test_Xy
 
         results = []
-        proba_train = self.predict_history(Xtrain)
-        proba_test  = self.predict_history(Xtest)
-        
-        pred_train  = self.classes_[(proba_train > .5).astype(int)]
-        pred_test   = self.classes_[(proba_test  > .5).astype(int)]
+        if proba:
+            proba_train = self.predict_history(Xtrain)
+            proba_test  = self.predict_history(Xtest)
+            pred_train  = self.classes_[(proba_train > .5).astype(int)]
+            pred_test   = self.classes_[(proba_test  > .5).astype(int)]
+            results = {
+                "acc_train": [accuracy_score(ytrain, pred) for pred in pred_train],
+                "acc_test":  [accuracy_score(ytest, pred)  for pred in pred_test],
+                "auc_train": [roc_auc_score(ytrain,  prob) for prob in proba_train],
+                "auc_test":  [roc_auc_score(ytest,   prob) for prob in proba_test],
+            }
+        else:
+            pred_train = self.predict_history(Xtrain, proba=False)
+            pred_test  = self.predict_history(Xtest, proba=False)
+            results = {
+                "rmse_train": [root_mean_squared_error(ytrain, pred) for pred in pred_train],
+                "rmse_test":  [root_mean_squared_error(ytest, pred)  for pred in pred_test],
+                "r2_train":   [r2_score(ytrain, pred) for pred in pred_train],
+                "r2_test":    [r2_score(ytest,  pred) for pred in pred_test],
+            }
 
-        results = {
-            "acc_train": [accuracy_score(ytrain, pred) for pred in pred_train],
-            "acc_test":  [accuracy_score(ytest, pred) for pred in pred_test],
-            "auc_train": [roc_auc_score(ytrain,  prob) for prob in proba_train],
-            "auc_test":  [roc_auc_score(ytest,   prob) for prob in proba_test]
-        }
         metrics_history = pd.DataFrame(results)
         iter_history    = super()._get_results(name)
         df_results      = pd.concat([iter_history, metrics_history], axis=1)
