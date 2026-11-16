@@ -44,3 +44,39 @@ print("rmse:", rmse)
 ```
 
 Under ```examples``` directory, you can find two examples on how to use FedTree with Python.
+
+
+# Install FedTree (linux)
+
+1. CMake>3.15 → `sudo apt install cmake`
+
+2. GMP library → `sudo apt install libgmp-dev`
+
+3. NTL library → en un directorio aparte
+```
+    wget https://libntl.org/ntl-11.5.1.tar.gz
+    tar -xvf ntl-11.5.1.tar.gz
+    cd ntl-11.5.1/src
+    ./configure SHARED=on
+    make
+    make check
+    sudo make install
+```
+
+gRPC 1.50.0 → no hace falta para experimentación en un solo ordenador
+            → `sudo apt install libgrpc-dev`
+
+# Clone & Build
+```
+git clone https://github.com/Xtra-Computing/FedTree
+cd FedTree
+git submodule init
+git submodule update
+```
+Un solo job para no quedar sin memoria y flags en CMAKE para que no compile gRPC (no lo vamos a usar)
+```
+# under the directory of FedTree
+mkdir build && cd build
+cmake .. -DDISTRIBUTED=OFF -DUSE_CUDA=OFF
+make -j1
+```
