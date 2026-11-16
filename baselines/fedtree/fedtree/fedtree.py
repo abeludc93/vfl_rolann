@@ -1,20 +1,26 @@
 from sklearn.base import BaseEstimator
 from sklearn.base import RegressorMixin, ClassifierMixin
-from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.metrics import mean_squared_error, accuracy_score, roc_auc_score, r2_score
 
+from time import perf_counter   # Abel: time fit process
+import pandas as pd             # Abel: results dataframe
 import numpy as np
 import scipy.sparse as sp
 import statistics
 
 from sklearn.utils import check_X_y
+from sklearn.utils.validation import check_is_fitted
 
 from ctypes import *
 from os import path
 from sys import platform
 
+# Abel: duplicated imports
+"""
 from ctypes import *
 from os import path
 from sys import platform
+"""
 
 dirname = path.dirname(path.abspath(__file__))
 
@@ -98,10 +104,13 @@ class FLModel(fedtreeBase):
         if sparse is False:
             X = sp.csr_matrix(X)
         X, y = check_X_y(X, y, dtype=np.float64, order='C', accept_sparse='csr')
-
         fit = self._sparse_fit
 
+        # Abel: fit time
+        t_ini = perf_counter()
         fit(X, y, groups=groups)
+        self.fit_time_ = perf_counter() - t_ini
+
         return self
 
     def _construct_groups(self, groups):
@@ -235,7 +244,6 @@ class FLModel(fedtreeBase):
         return self.predict_proba_
 
 
-
     def save_model(self, model_path):
         if self.model is None:
             print("Please train the model first or load model from file!")
@@ -282,7 +290,6 @@ class FLModel(fedtreeBase):
         #     group_label
         # )
         # self.group_label = [group_label[idx] for idx in range(self.num_class)]
-
 
     def __del__(self):
         if self.model is not None:
@@ -350,6 +357,16 @@ class FLModel(fedtreeBase):
             print("mean test RMSE:%.6f+%.6f" %(statistics.mean(test_score_list), statistics.stdev(test_score_list)))
         return self.eval_res
 
+    # Abel: auxiliary dataframe for results
+    def _get_results(self, name=None):
+        check_is_fitted(self)
+        depth, ntrees = self.max_depth, self.n_trees
+        round_ft = list(range(1, ntrees + 1))
+        iters_ft = np.arange(start=depth, stop=depth * ntrees + depth, step=depth) # D, D*T+D, D
+        time_ft  = self.fit_time_
+        df_ft    = pd.DataFrame({'round': round_ft, 'iter': iters_ft, 'total_time': time_ft})
+        return df_ft.assign(name=name) if name else df_ft
+
 # Abel: mixins should be on the left for proper MRO
 class FLClassifier(fedtreeClassifierBase, FLModel):
     _impl = 'classifier'
@@ -374,6 +391,53 @@ class FLClassifier(fedtreeClassifierBase, FLModel):
         super().fit(X, y, groups=groups)
         self.classes_ = np.unique(y)
         return self
+    
+    # Abel: override `super().predict` via predict_proba, as it isn't working properly
+    def predict(self, X):
+        return self.classes_[self.predict_proba(X).argmax(axis=1)]
+
+    # Abel: predict_proba_at
+    def predict_history(self, X, proba=True):
+        if self.model is None:
+            print("Please train the model first or load model from file!")
+            raise ValueError
+        n_trees_original = self.n_trees
+        predict_fn = self.predict_proba if proba else self.predict
+        try:
+            history = []
+            for n in range(1, n_trees_original + 1):
+                self.n_trees = n
+                y = predict_fn(X)
+                history.append(y[:, 1] if proba else y)
+            history = np.array(history)
+        finally:
+            self.n_trees = n_trees_original
+        return history
+
+    # Abel:
+    def get_results(self, train_Xy, test_Xy, name=None):
+        Xtrain, ytrain  = train_Xy
+        Xtest, ytest    = test_Xy
+
+        results = []
+        proba_train = self.predict_history(Xtrain)
+        proba_test  = self.predict_history(Xtest)
+        
+        pred_train  = self.classes_[(proba_train > .5).astype(int)]
+        pred_test   = self.classes_[(proba_test  > .5).astype(int)]
+
+        results = {
+            "acc_train": [accuracy_score(ytrain, pred) for pred in pred_train],
+            "acc_test":  [accuracy_score(ytest, pred) for pred in pred_test],
+            "auc_train": [roc_auc_score(ytrain,  prob) for prob in proba_train],
+            "auc_test":  [roc_auc_score(ytest,   prob) for prob in proba_test]
+        }
+        metrics_history = pd.DataFrame(results)
+        iter_history    = super()._get_results(name)
+        df_results      = pd.concat([iter_history, metrics_history], axis=1)
+        
+        return df_results
+
 
 # Abel: mixins should be on the left for proper MRO
 class FLRegressor(fedtreeRegressorBase, FLModel):

@@ -352,7 +352,7 @@ ft_gbdt_params = {
     'lambda_ft':1,                      # L2 reg
     'learning_rate':1,                  # learning rate
     'objective':"binary:logistic",      # f.obj: 'reg:linear'|'reg:logistic'|'binary:logistic'
-    'verbose': 1,                       # 0|1|2               
+    'verbose': 0,                       # 0|1             
     #gamma=1,                           # ?
     #min_child_weight=1,                
     #column_sampling_rate=1,
@@ -368,7 +368,7 @@ ft_gbdt_params = {
 }
 model = FLClassifier(**ft_gbdt_params|ft_vfl_params)
 
-# Entrenamos y capturamos salida
+# Entrenamos y capturamos salida (vebose=1)
 from wurlitzer import pipes
 with pipes() as (out, _):
   model.fit(X_train, y_train)
@@ -392,7 +392,7 @@ log_ft = f.getvalue()
 print(f"LOG: {log_ft}")
 """
 from sklearn.metrics import accuracy_score, roc_auc_score
-
+model.fit(X_train, y_train)
 score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
 score_ft_test  = model.predict_proba(X_test)[:,1]   # clase positiva
 
@@ -421,8 +421,6 @@ try:
 finally:
     model.n_trees = n_trees_original
 
-
-
 #%% [TEST GSCV FEDTREE]
 # GridSearch FEDTREE
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
@@ -444,10 +442,33 @@ gscv_ft.fit(Xtrainval, ytrainval)
 df_gscv_ft = pd.DataFrame(gscv_ft.cv_results_)
 print(f"Mejores params FT: {gscv_ft.best_params_}")
 
-# Re-entrenar mejor modelo: (TODO) integrar captura outputs y get_results dentro
+# Re-entrenar mejor modelo: si refit=False
 from sklearn.base import clone
 best_model = clone(model).set_params(**gscv_ft.best_params_)
 best_model.fit(X_train, y_train)
+
+#%% RESULTADOS EVOLUCION
+from sklearn.metrics import accuracy_score, roc_auc_score
+
+model.fit(X_train, y_train)
+score_ft_train = model.predict_proba(X_train)[:,1]  # clase positiva
+score_ft_test  = model.predict_proba(X_test)[:,1]   # clase positiva
+
+acc_ft_train = accuracy_score(y_train, (score_ft_train > .5).astype(int))
+auc_ft_train = roc_auc_score(y_train, score_ft_train) 
+acc_ft_test = accuracy_score(y_test, (score_ft_test > .5).astype(int))
+auc_ft_test = roc_auc_score(y_test, score_ft_test) 
+
+print(f"Accuracy train: {100 * acc_ft_train:.2f} %")   # 89.95 %
+print(f"Accuracy test: {100 * acc_ft_test:.2f} %")     # 79.11 %
+
+print(f"AUC train: {100 * auc_ft_train:.2f} %")   # 94.36 %
+print(f"AUC test: {100 * auc_ft_test:.2f} %")     # 73.90 %
+
+df_ft = model.get_results(train_Xy=(X_train, y_train), test_Xy=(X_test, y_test))
+df_ft.iloc[:, 3:].plot(subplots=[('acc_test', 'acc_train'),
+                                 ('auc_test', 'auc_train')],
+                       layout=(1,2), figsize=(20,8))
 
 #%% [TEST SPLITNN]
 from splitnn import SplitNNClassifier
